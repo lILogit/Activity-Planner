@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python3 -:*)",
+      "Bash(.venv/bin/uvicorn app.main:app --reload --port 8000)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/admin)",
+      "Bash(pkill -f \"uvicorn app.main:app\")",
+      "Bash(curl -s \"https://api.telegram.org/bot8022122256:AAF9EkCzBDsLSuzrSYYmfGpDaoZGX-vJsUs/getWebhookInfo\")",
+      "Bash(curl -s http://localhost:4040/api/tunnels)",
+      "Bash(pkill -f \"ngrok\")",
+      "Bash(curl -s \"https://pauline-rudimentary-jimmy.ngrok-free.dev/health\")",
+      "Bash(curl -s \"https://api.telegram.org/bot820879491:AAFc8cv4bjjXWtFE2lXfc5fNVzUEqEaBvrE/getWebhookInfo\")",
+      "Bash(curl -s \"https://api.telegram.org/bot8820879491:AAFc8cv4bjjXWtFE2lXfc5fNVzUEqEaBvrE/getMe\")",
+      "Bash(curl -s \"https://api.telegram.org/bot8820879491:AAFc8cv4bjjXWtFE2lXfc5fNVzUEqEaBvrE/getWebhookInfo\")",
+      "Bash(curl -s http://localhost:8000/api/state)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/dashboard)",
+      "Bash(curl -s -X POST http://localhost:8000/api/enrich -H \"Content-Type: application/json\" -d '{\"\"text\"\": \"\"Golf tournament in Hluboká nad Vltavou on 19.6.2026\"\"}')",
+      "Bash(curl -s \"https://us1.locationiq.com/v1/search?key=pk.2957d1ea34659e13e7635022b1eebab&q=Hlubok%C3%A1+nad+Vltavou+golf&format=json&limit=1\")",
+      "Bash(.venv/bin/python3 -c \":*)",
+      "Read(//Users/jirikouba/Documents/**)",
+      "Bash(curl -s -X POST http://localhost:8000/api/import/gps-csv)",
+      "Bash(curl -s -X PATCH http://localhost:8000/api/activity/139 -H \"Content-Type: application/json\" -d '{\"\"cluster\"\": \"\"TRIP\"\"}')",
+      "Bash(curl -s -X PATCH http://localhost:8000/api/activity/134 -H \"Content-Type: application/json\" -d '{\"\"cluster\"\": \"\"HEALTH / WELLNESS\"\"}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/import/create-venues-from-sessions)",
+      "Bash(curl -s -X POST http://localhost:8000/gps -H \"Content-Type: application/json\" -d '{\"\"locations\"\":[{\"\"geometry\"\":{\"\"coordinates\"\":[14.384,49.962]},\"\"properties\"\":{\"\"timestamp\"\":\"\"2026-06-15T08:00:00Z\"\",\"\"altitude\"\":200}}]}')",
+      "Bash(curl -s -X POST http://localhost:8000/gps -H \"Content-Type: application/json\" -d '{\"\"locations\"\":[{\"\"geometry\"\":{\"\"coordinates\"\":[14.384,49.962]},\"\"properties\"\":{\"\"timestamp\"\":\"\"2026-06-15T09:00:00Z\"\"}}]}')",
+      "Bash(curl -s -X POST http://localhost:8000/gps -H \"Content-Type: application/json\" -d '{\"\"locations\"\":[{\"\"geometry\"\":{\"\"coordinates\"\":[14.384,49.962]},\"\"properties\"\":{\"\"timestamp\"\":\"\"2026-06-15T09:30:00Z\"\",\"\"altitude\"\":200}}]}')"
+    ]
+  }
+}

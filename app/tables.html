@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KAIROS Tables</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+    --text: #e2e8f0; --muted: #8892a4; --accent: #6c8ebf;
+    --ok: #4ade80; --err: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 16px; font-weight: 700; letter-spacing: .05em; color: var(--accent); }
+  header a { color: var(--muted); text-decoration: none; font-size: 12px; }
+  header a:hover { color: var(--accent); }
+  #status { font-size: 12px; color: var(--muted); min-height: 16px; }
+  #status.ok { color: var(--ok); }
+  #status.err { color: var(--err); }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .tab { background: none; border: none; color: var(--muted); padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600; border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--text); }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr.new-row td { border-top: 1px dashed var(--border); }
+  input[type=text], input[type=number], select {
+    background: #1e2235; border: 1px solid var(--border); color: var(--text);
+    border-radius: 4px; padding: 4px 6px; font-size: 12px; font-family: inherit;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  input[type=checkbox] { width: 16px; height: 16px; }
+  button.act { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); cursor: pointer; padding: 3px 8px; font-size: 11px; white-space: nowrap; }
+  button.act:hover { border-color: var(--accent); color: var(--accent); }
+  button.act.danger:hover { border-color: var(--err); color: var(--err); }
+  button.act.primary { border-color: var(--accent); color: var(--accent); }
+  .actions { display: flex; gap: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KAIROS — Tables</h1>
+  <div style="display:flex;align-items:center;gap:16px">
+    <span id="status"></span>
+    <a href="/dashboard">&larr; Dashboard</a>
+  </div>
+</header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <section><div id="table-container">Loading…</div></section>
+</main>
+
+<script>
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+const CLUSTERS = [
+  'SPORT','CULTURE','RELAX','RECOVERY','STUDY',
+  'WORK','LIFE ADMIN','FAMILY / CARE','HEALTH / WELLNESS',
+  'TRIP','SOCIAL',
+];
+
+const TABLES = {
+  activities: { label: 'Activities', columns: [
+    {key:'name', type:'text', required:true},
+    {key:'cluster', type:'select', options: CLUSTERS, required:true},
+    {key:'alpha', type:'number'},
+    {key:'beta', type:'number'},
+    {key:'daylight_required', type:'bool'},
+    {key:'t_min', type:'number'},
+    {key:'t_max', type:'number'},
+    {key:'season_mask', type:'text'},
+    {key:'typical_duration_min', type:'number'},
+    {key:'active', type:'bool'},
+  ]},
+  venues: { label: 'Venues', columns: [
+    {key:'name', type:'text', required:true},
+    {key:'lat', type:'number', required:true},
+    {key:'lon', type:'number', required:true},
+    {key:'radius_m', type:'number'},
+    {key:'activity_id', type:'fk'},
+    {key:'is_anchor', type:'bool'},
+    {key:'address', type:'text'},
+  ]},
+  rules: { label: 'Rules', columns: [
+    {key:'cond_type', type:'text', required:true},
+    {key:'cond_value', type:'text', required:true},
+    {key:'activity_id', type:'fk', required:true},
+    {key:'kind', type:'select', options:['activate','block','modulate'], required:true},
+    {key:'weight', type:'number'},
+  ]},
+  goals: { label: 'Goals', columns: [
+    {key:'name', type:'text', required:true},
+    {key:'activity_id', type:'fk'},
+    {key:'metric', type:'text'},
+    {key:'target', type:'number', required:true},
+    {key:'cadence_days', type:'number'},
+    {key:'progress', type:'number'},
+  ]},
+};
+
+let currentTable = 'activities';
+
+function renderTabs() {
+  document.getElementById('tabs').innerHTML = Object.entries(TABLES).map(([name, cfg]) =>
+    `<button class="tab${name===currentTable?' active':''}" onclick="switchTable('${name}')">${cfg.label}</button>`
+  ).join('');
+}
+
+function switchTable(name) {
+  currentTable = name;
+  renderTabs();
+  loadTable(name);
+}
+
+function showStatus(msg, isErr) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = msg ? (isErr ? 'err' : 'ok') : '';
+}
+
+async function api(path, method, body) {
+  const opts = {method: method || 'GET'};
+  if (body !== undefined) {
+    opts.headers = {'Content-Type': 'application/json'};
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, opts);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+  return d;
+}
+
+async function loadTable(name) {
+  showStatus('Loading…');
+  document.getElementById('table-container').innerHTML = 'Loading…';
+  try {
+    const cfg = TABLES[name];
+    const needsActivities = cfg.columns.some(c => c.type === 'fk') || name === 'activities';
+    const [rows, activities] = await Promise.all([
+      api(`/api/${name}`),
+      needsActivities ? api('/api/activities') : Promise.resolve([]),
+    ]);
+    renderTable(name, rows, activities);
+    showStatus('');
+  } catch (e) {
+    showStatus('Error: ' + e.message, true);
+    document.getElementById('table-container').innerHTML = '<p style="color:var(--err)">Failed to load.</p>';
+  }
+}
+
+function fieldId(table, rowId, key) {
+  return `f-${table}-${rowId}-${key}`;
+}
+
+function renderField(table, col, rowId, value, activities) {
+  const id = fieldId(table, rowId, col.key);
+  if (col.type === 'select') {
+    const opts = col.options.map(o =>
+      `<option value="${esc(o)}"${o === value ? ' selected' : ''}>${esc(o)}</option>`
+    ).join('');
+    return `<select id="${id}">${opts}</select>`;
+  }
+  if (col.type === 'fk') {
+    const opts = ['<option value="">—</option>'].concat(
+      activities.map(a => `<option value="${a.id}"${a.id === value ? ' selected' : ''}>${esc(a.name)}</option>`)
+    ).join('');
+    return `<select id="${id}">${opts}</select>`;
+  }
+  if (col.type === 'bool') {
+    return `<input type="checkbox" id="${id}"${value ? ' checked' : ''}>`;
+  }
+  if (col.type === 'number') {
+    return `<input type="number" id="${id}" step="any" value="${value ?? ''}" style="width:80px">`;
+  }
+  return `<input type="text" id="${id}" value="${esc(value ?? '')}" style="width:140px">`;
+}
+
+function collectField(table, col, rowId) {
+  const el = document.getElementById(fieldId(table, rowId, col.key));
+  if (col.type === 'bool') return el.checked ? 1 : 0;
+  if (col.type === 'number' || col.type === 'fk') {
+    return el.value === '' ? null : Number(el.value);
+  }
+  return el.value;
+}
+
+function renderTable(name, rows, activities) {
+  const cfg = TABLES[name];
+  const hasMap = name === 'venues';
+  const thead = cfg.columns.map(c => `<th>${esc(c.key)}</th>`).join('') + (hasMap ? '<th></th>' : '') + '<th></th>';
+  const mapCell = r => `<td><a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" rel="noopener">Map</a></td>`;
+  const body = rows.map(r => {
+    const cells = cfg.columns.map(c =>
+      `<td>${renderField(name, c, r.id, r[c.key], activities)}</td>`
+    ).join('');
+    return `<tr>
+      <td class="muted" style="color:var(--muted)">${r.id}</td>
+      ${cells}
+      ${hasMap ? mapCell(r) : ''}
+      <td class="actions">
+        <button class="act primary" onclick="saveRow('${name}', ${r.id})">Save</button>
+        <button class="act danger" onclick="deleteRow('${name}', ${r.id})">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+  const newCells = cfg.columns.map(c =>
+    `<td>${renderField(name, c, 'new', c.type === 'bool' ? 0 : '', activities)}</td>`
+  ).join('');
+  const newRow = `<tr class="new-row">
+    <td class="muted" style="color:var(--muted)">new</td>
+    ${newCells}
+    ${hasMap ? '<td></td>' : ''}
+    <td><button class="act primary" onclick="addRow('${name}')">Add</button></td>
+  </tr>`;
+  document.getElementById('table-container').innerHTML = `
+    <table>
+      <thead><tr><th>id</th>${thead}</tr></thead>
+      <tbody>${body || `<tr><td colspan="${cfg.columns.length + (hasMap ? 3 : 2)}" style="color:var(--muted)">No rows yet.</td></tr>`}${newRow}</tbody>
+    </table>`;
+}
+
+async function saveRow(name, rowId) {
+  const cfg = TABLES[name];
+  const body = {};
+  cfg.columns.forEach(c => { body[c.key] = collectField(name, c, rowId); });
+  try {
+    await api(`/api/${name}/${rowId}`, 'PUT', body);
+    showStatus('Saved.');
+    loadTable(name);
+  } catch (e) {
+    showStatus('Error: ' + e.message, true);
+  }
+}
+
+async function deleteRow(name, rowId) {
+  if (!confirm(`Delete ${name.slice(0, -1)} #${rowId}?`)) return;
+  try {
+    await api(`/api/${name}/${rowId}`, 'DELETE');
+    showStatus('Deleted.');
+    loadTable(name);
+  } catch (e) {
+    showStatus('Error: ' + e.message, true);
+  }
+}
+
+async function addRow(name) {
+  const cfg = TABLES[name];
+  const body = {};
+  cfg.columns.forEach(c => {
+    const v = collectField(name, c, 'new');
+    // Leave blank optional fields out of the payload entirely so the
+    // column's SQL default applies, instead of sending an explicit
+    // null/'' that collides with NOT NULL DEFAULT columns.
+    if (v === null || v === '') return;
+    body[c.key] = v;
+  });
+  try {
+    await api(`/api/${name}`, 'POST', body);
+    showStatus('Added.');
+    loadTable(name);
+  } catch (e) {
+    showStatus('Error: ' + e.message, true);
+  }
+}
+
+renderTabs();
+loadTable(currentTable);
+</script>
+</body>
+</html>

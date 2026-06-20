@@ -1,0 +1,11 @@
+.env
+GPS records.csv
+*.db
+*.db-shm
+*.db-wal
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.DS_Store

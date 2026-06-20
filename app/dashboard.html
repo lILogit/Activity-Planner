@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KAIROS Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+    --text: #e2e8f0; --muted: #8892a4; --accent: #6c8ebf;
+    --now: #4ade80; --next: #facc15; --park: #f97316; --archive: #94a3b8;
+    --approved: #4ade80; --proposed: #facc15; --rejected: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 16px; font-weight: 700; letter-spacing: .05em; color: var(--accent); }
+  #status { font-size: 12px; color: var(--muted); }
+  #status.ok::before { content: "● "; color: var(--now); }
+  #status.err::before { content: "● "; color: var(--park); }
+  main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  section.full { grid-column: 1 / -1; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .route-NOW { background: #14532d; color: var(--now); }
+  .route-NEXT { background: #713f12; color: var(--facc15, #facc15); }
+  .route-PARK { background: #431407; color: var(--park); }
+  .route-ARCHIVE { background: #1e293b; color: var(--archive); }
+  .status-approved { background: #14532d; color: var(--approved); }
+  .status-proposed { background: #713f12; color: var(--next); }
+  .status-rejected { background: #450a0a; color: var(--rejected); }
+  .cluster-SPORT { color: #60a5fa; }
+  .cluster-CULTURE { color: #f9a8d4; }
+  .cluster-RELAX { color: #86efac; }
+  .cluster-RECOVERY { color: #34d399; }
+  .cluster-STUDY { color: #c4b5fd; }
+  .cluster-WORK { color: #94a3b8; }
+  .cluster-LIFE_ADMIN { color: #fdba74; }
+  .cluster-FAMILY_CARE { color: #f472b6; }
+  .cluster-HEALTH_WELLNESS { color: #2dd4bf; }
+  .cluster-TRIP { color: #a78bfa; }
+  .cluster-SOCIAL { color: #fbbf24; }
+  .plan-summary { font-size: 15px; font-weight: 500; margin-bottom: 12px; line-height: 1.5; }
+  .pick { background: #1e2235; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
+  .pick-name { font-weight: 700; font-size: 14px; }
+  .pick-reason { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .conditions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cond-pill { background: #1e2235; border-radius: 20px; padding: 4px 12px; font-size: 12px; }
+  .stars { color: #facc15; }
+  .muted { color: var(--muted); }
+  .bar { height: 4px; background: var(--border); border-radius: 2px; margin-top: 4px; }
+  .bar-fill { height: 4px; border-radius: 2px; background: var(--accent); }
+  #loading { text-align: center; padding: 40px; color: var(--muted); grid-column: 1/-1; }
+  .enrich-form { display: flex; gap: 8px; }
+  .enrich-form textarea { flex: 1; background: #1e2235; border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 8px 10px; font-size: 13px; resize: vertical; min-height: 60px; font-family: inherit; }
+  .enrich-form textarea:focus { outline: none; border-color: var(--accent); }
+  .enrich-form button { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600; align-self: flex-end; }
+  .enrich-form button:disabled { opacity: .5; cursor: default; }
+  #enrich-result { margin-top: 10px; font-size: 12px; }
+  .enrich-ok { color: var(--now); }
+  .enrich-warn { color: var(--next); }
+  .enrich-err { color: #f87171; }
+  .star-btn { background: none; border: none; cursor: pointer; font-size: 16px; padding: 0 2px; color: var(--border); transition: color .1s; }
+  .star-btn:hover { color: #facc15; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KAIROS</h1>
+  <div style="display:flex;align-items:center;gap:16px">
+    <span id="status" class="ok">Loading…</span>
+    <a href="/tables" style="color:var(--muted);text-decoration:none;font-size:12px">Edit tables &rarr;</a>
+  </div>
+</header>
+<main id="main">
+  <div id="loading">Loading data…</div>
+</main>
+
+<script>
+const fmt = ts => ts ? new Date(ts * 1000).toLocaleString('cs-CZ', {timeZone: 'Europe/Prague', hour12: false, month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '—';
+const fmtDur = s => s < 3600 ? `${Math.round(s/60)}m` : `${(s/3600).toFixed(1)}h`;
+const stars = n => n ? '★'.repeat(n) + '☆'.repeat(5-n) : '—';
+const badge = (cls, txt) => `<span class="badge ${cls}">${txt}</span>`;
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+async function load() {
+  try {
+    const r = await fetch('/api/state');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    render(d);
+    document.getElementById('status').className = 'ok';
+    document.getElementById('status').textContent = 'Live · ' + new Date().toLocaleTimeString('cs-CZ');
+  } catch(e) {
+    document.getElementById('status').className = 'err';
+    document.getElementById('status').textContent = 'Error: ' + e.message;
+  }
+}
+
+function render(d) {
+  const c = d.conditions;
+  const plan = d.current_plan;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    ${renderImport()}
+    ${renderEnrich()}
+    ${renderConditions(c)}
+    ${renderPlan(plan)}
+    ${renderActivities(d.activities)}
+    ${renderGoals(d.goals)}
+    ${renderVenues(d.venues)}
+    ${renderSessions(d.sessions)}
+    ${renderFeedback(d.feedback)}
+    ${renderRecentPlans(d.recent_plans)}
+    ${renderPings(d.pings)}
+  `;
+}
+
+function renderConditions(c) {
+  const weather = c.weather || '—';
+  const temp = c.temp != null ? `${c.temp}°C` : '—';
+  const daylight = c.daytime ? '☀️ Daylight' : '🌙 Dark';
+  const season = c.season ? c.season.charAt(0).toUpperCase() + c.season.slice(1) : '—';
+  return `<section>
+    <h2>Conditions</h2>
+    <div class="conditions">
+      <span class="cond-pill">🌱 ${esc(season)}</span>
+      <span class="cond-pill">${esc(daylight)}</span>
+      <span class="cond-pill">🌤 ${esc(weather)}</span>
+      <span class="cond-pill">🌡 ${esc(temp)}</span>
+    </div>
+  </section>`;
+}
+
+function renderPlan(plan) {
+  if (!plan) return `<section>
+    <h2>Today's Plan</h2>
+    <p class="muted">No plan yet today. Trigger one from the bot or wait for 06:30.</p>
+  </section>`;
+  const statusBadge = badge('status-' + plan.status, plan.status.toUpperCase());
+  const picks = (plan.picks || []).map(p => {
+    const routeBadge = badge('route-' + p.route, p.route);
+    return `<div class="pick">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="pick-name">${esc(p.name)}</span>
+        ${routeBadge}
+      </div>
+      <div class="pick-reason">${esc(p.reason)}</div>
+      <div style="display:flex;gap:16px;margin-top:6px;font-size:11px;color:var(--muted)">
+        <span>Pref ${(p.pref*100).toFixed(0)}%</span>
+        <span>Fit ${(p.fit*100).toFixed(0)}%</span>
+        <span>U=${p.utility}</span>
+      </div>
+    </div>`;
+  }).join('');
+  return `<section>
+    <h2>Today's Plan ${statusBadge} <span style="float:right;font-weight:400;font-size:11px">${esc(plan.horizon)} · ${esc(plan.date)}</span></h2>
+    <p class="plan-summary">${esc(plan.summary)}</p>
+    ${picks}
+  </section>`;
+}
+
+const CLUSTERS = [
+  'SPORT','CULTURE','RELAX','RECOVERY','STUDY',
+  'WORK','LIFE ADMIN','FAMILY / CARE','HEALTH / WELLNESS',
+  'TRIP','SOCIAL',
+];
+const clusterCss = c => 'cluster-' + c.replace(/[\s\/]+/g,'_');
+
+function renderActivities(acts) {
+  const rows = (acts || []).map(a => {
+    const pct = Math.round(a.pref * 100);
+    const clusterOpts = CLUSTERS.map(c =>
+      `<option value="${c}"${c===a.cluster?' selected':''}>${c}</option>`
+    ).join('');
+    const archiveBtn = a.active
+      ? `<button onclick="patchActivity(${a.id},{active:0})" title="Archive" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;padding:2px 6px;font-size:11px">Archive</button>`
+      : `<button onclick="patchActivity(${a.id},{active:1})" title="Restore" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--accent);cursor:pointer;padding:2px 6px;font-size:11px">Restore</button>`;
+    return `<tr id="act-${a.id}" style="${a.active?'':'opacity:.45'}">
+      <td><strong>${esc(a.name)}</strong></td>
+      <td>
+        <select id="cluster-${a.id}" onchange="patchActivity(${a.id},{cluster:this.value})"
+          style="background:#1e2235;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 4px;font-size:12px">
+          ${clusterOpts}
+        </select>
+      </td>
+      <td>${badge('route-' + a.route, a.route)}</td>
+      <td>
+        ${pct}%
+        <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+      </td>
+      <td class="muted">${(a.fit*100).toFixed(0)}%</td>
+      <td class="muted">${a.utility}</td>
+      <td style="white-space:nowrap">${archiveBtn}</td>
+    </tr>`;
+  }).join('');
+  return `<section class="full">
+    <h2>Activity Scores</h2>
+    <table>
+      <tr><th>Activity</th><th>Cluster</th><th>Route</th><th>Preference</th><th>Fit</th><th>Utility</th><th style="width:60px"></th></tr>
+      ${rows}
+    </table>
+  </section>`;
+}
+
+function renderSessions(sessions) {
+  const rows = (sessions || []).map(s => {
+    let starCell;
+    if (s.stars) {
+      starCell = `<span class="stars">${stars(s.stars)}</span>`;
+    } else {
+      const btns = [1,2,3,4,5].map(n =>
+        `<button class="star-btn" title="${n} star${n>1?'s':''}" onclick="logFeedback(${s.id},${n})">★</button>`
+      ).join('');
+      starCell = `<span style="white-space:nowrap">${btns}</span>`;
+    }
+    return `<tr id="sess-${s.id}">
+      <td>${esc(fmt(s.start_ts))}</td>
+      <td><strong>${esc(s.activity || '?')}</strong></td>
+      <td class="muted">${esc(s.venue || '—')}</td>
+      <td>${fmtDur(s.duration_s)}</td>
+      <td class="muted">${s.confidence != null ? (s.confidence*100).toFixed(0)+'%' : '—'}</td>
+      <td id="stars-${s.id}">${starCell}</td>
+    </tr>`;
+  }).join('');
+  return `<section class="full">
+    <h2>Session Log</h2>
+    <table>
+      <tr><th>When</th><th>Activity</th><th>Venue</th><th>Duration</th><th>Confidence</th><th>Stars</th></tr>
+      ${rows || '<tr><td colspan="6" class="muted">No sessions yet.</td></tr>'}
+    </table>
+  </section>`;
+}
+
+async function logFeedback(sessionId, starCount) {
+  const cell = document.getElementById('stars-' + sessionId);
+  if (cell) cell.innerHTML = '<span class="muted">Saving…</span>';
+  try {
+    const r = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: sessionId, stars: starCount}),
+    });
+    const d = await r.json();
+    if (d.error) {
+      if (cell) cell.innerHTML = `<span class="enrich-err">${esc(d.error)}</span>`;
+    } else {
+      if (cell) cell.innerHTML = `<span class="stars">${stars(starCount)}</span> <span class="muted" style="font-size:11px">pref→${d.new_pref}</span>`;
+    }
+  } catch(e) {
+    if (cell) cell.innerHTML = `<span class="enrich-err">Error</span>`;
+  }
+}
+
+function renderFeedback(feedback) {
+  const rows = (feedback || []).map(f => `<tr>
+    <td>${esc(fmt(f.ts))}</td>
+    <td><strong>${esc(f.activity || '?')}</strong></td>
+    <td><span class="stars">${stars(f.stars)}</span></td>
+    <td class="muted">${esc(f.note || '—')}</td>
+    <td class="muted">${f.emotion ? '#'+esc(f.emotion) : '—'}</td>
+  </tr>`).join('');
+  return `<section>
+    <h2>Feedback History</h2>
+    <table>
+      <tr><th>When</th><th>Activity</th><th>Stars</th><th>Note</th><th>Emotion</th></tr>
+      ${rows || '<tr><td colspan="5" class="muted">No feedback yet.</td></tr>'}
+    </table>
+  </section>`;
+}
+
+function renderRecentPlans(plans) {
+  const rows = (plans || []).map(p => {
+    const pickNames = (p.picks || []).map(pk => esc(pk.name)).join(', ');
+    return `<tr>
+      <td>${esc(p.date)}</td>
+      <td class="muted">${esc(p.horizon)}</td>
+      <td>${badge('status-' + p.status, p.status.toUpperCase())}</td>
+      <td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.summary)}</td>
+      <td class="muted">${pickNames || '—'}</td>
+    </tr>`;
+  }).join('');
+  return `<section>
+    <h2>Recent Plans</h2>
+    <table>
+      <tr><th>Date</th><th>Horizon</th><th>Status</th><th>Summary</th><th>Picks</th></tr>
+      ${rows || '<tr><td colspan="5" class="muted">No plans yet.</td></tr>'}
+    </table>
+  </section>`;
+}
+
+function renderPings(pings) {
+  const rows = (pings || []).map(p => `<tr>
+    <td>${esc(fmt(p.ts))}</td>
+    <td style="font-size:11px;font-family:monospace">${p.lat?.toFixed(4)}, ${p.lon?.toFixed(4)}</td>
+    <td class="muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.address || '—')}</td>
+    <td class="muted">${esc(p.weather_main || '—')}</td>
+    <td class="muted">${p.temp != null ? p.temp+'°C' : '—'}</td>
+    <td class="muted">${p.session_id == null ? '…' : p.session_id === 0 ? '🏠' : '#'+p.session_id}</td>
+  </tr>`).join('');
+  return `<section class="full">
+    <h2>GPS Ping Log (last 30)</h2>
+    <table>
+      <tr><th>Time</th><th>Coordinates</th><th>Address</th><th>Weather</th><th>Temp</th><th>Session</th></tr>
+      ${rows || '<tr><td colspan="6" class="muted">No pings yet.</td></tr>'}
+    </table>
+  </section>`;
+}
+
+function renderImport() {
+  return `<section class="full">
+    <h2>Import — GPS records.csv</h2>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <button id="import-btn" onclick="runImport()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600">Import GPS records.csv</button>
+      <button id="venues-btn" onclick="createVenues()" style="background:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600">Create venues from sessions</button>
+      <span id="import-result" class="muted" style="font-size:12px"></span>
+    </div>
+  </section>`;
+}
+
+async function createVenues() {
+  const btn = document.getElementById('venues-btn');
+  const res = document.getElementById('import-result');
+  btn.disabled = true;
+  res.textContent = 'Creating venues…';
+  try {
+    const r = await fetch('/api/import/create-venues-from-sessions', {method: 'POST'});
+    const d = await r.json();
+    if (d.error) {
+      res.innerHTML = `<span class="enrich-err">${esc(d.error)}</span>`;
+    } else {
+      res.innerHTML = `<span class="enrich-ok">Created ${d.venues_created} venue(s) from session centroids.</span>`;
+      load();
+    }
+  } catch(e) {
+    res.innerHTML = `<span class="enrich-err">${esc(String(e))}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runImport() {
+  const btn = document.getElementById('import-btn');
+  const res = document.getElementById('import-result');
+  btn.disabled = true;
+  res.textContent = 'Importing…';
+  try {
+    const r = await fetch('/api/import/gps-csv', {method: 'POST'});
+    const d = await r.json();
+    if (d.error) {
+      res.innerHTML = `<span class="enrich-err">${esc(d.error)}</span>`;
+    } else {
+      res.innerHTML = `<span class="enrich-ok">Done — ${d.pings_imported} pings, ${d.sessions_created} sessions, ${d.feedback_created} feedback rows. Skipped: ${d.skipped}.</span>`;
+      load();
+    }
+  } catch(e) {
+    res.innerHTML = `<span class="enrich-err">${esc(String(e))}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderEnrich() {
+  return `<section class="full">
+    <h2>Enrich — add new venues / events</h2>
+    <div class="enrich-form">
+      <textarea id="enrich-text" placeholder="e.g. Golf tournament in Hluboká nad Vltavou on 19.6.2026&#10;New cycling trail opened at Prokopské údolí"></textarea>
+      <button id="enrich-btn" onclick="submitEnrich()">Extract &amp; Save</button>
+    </div>
+    <div id="enrich-result"></div>
+  </section>`;
+}
+
+async function submitEnrich() {
+  const txt = document.getElementById('enrich-text').value.trim();
+  if (!txt) return;
+  const btn = document.getElementById('enrich-btn');
+  const res = document.getElementById('enrich-result');
+  btn.disabled = true;
+  res.innerHTML = '<span class="muted">Extracting…</span>';
+  try {
+    const r = await fetch('/api/enrich', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: txt})});
+    const d = await r.json();
+    if (d.error) { res.innerHTML = `<span class="enrich-err">Error: ${esc(d.error)}</span>`; return; }
+    if (d.note)  { res.innerHTML = `<span class="enrich-warn">${esc(d.note)}</span>`; return; }
+    const lines = (d.inserted || []).map(i => {
+      const geo = i.geocoded ? `${i.lat?.toFixed(4)}, ${i.lon?.toFixed(4)}` : '<span class="enrich-warn">not geocoded</span>';
+      const warn = i.warning ? `<br><span class="enrich-warn">${esc(i.warning)}</span>` : '';
+      return `<div class="enrich-ok">✓ <strong>${esc(i.venue)}</strong> · ${esc(i.activity)} · ${geo}${i.event_date ? ' · '+esc(i.event_date) : ''}${warn}</div>`;
+    });
+    res.innerHTML = lines.length ? lines.join('') : '<span class="muted">Nothing inserted.</span>';
+    document.getElementById('enrich-text').value = '';
+    load(); // refresh tables
+  } catch(e) {
+    res.innerHTML = `<span class="enrich-err">${esc(String(e))}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderVenues(venues) {
+  const rows = (venues || []).map(v => `<tr>
+    <td>${v.is_anchor ? '🏠 ' : ''}${esc(v.name)}</td>
+    <td class="muted">${esc(v.activity || '—')}</td>
+    <td style="font-size:11px;font-family:monospace">${v.lat?.toFixed(4)}, ${v.lon?.toFixed(4)}</td>
+    <td class="muted">${v.radius_m}m</td>
+    <td class="muted">${esc(v.address || '—')}</td>
+    <td><a href="https://www.google.com/maps?q=${v.lat},${v.lon}" target="_blank" rel="noopener">Map</a></td>
+  </tr>`).join('');
+  return `<section>
+    <h2>Venues</h2>
+    <table>
+      <tr><th>Name</th><th>Activity</th><th>Coordinates</th><th>Radius</th><th>Address</th><th></th></tr>
+      ${rows || '<tr><td colspan="6" class="muted">None.</td></tr>'}
+    </table>
+  </section>`;
+}
+
+function renderGoals(goals) {
+  const rows = (goals || []).map(g => {
+    const pct = g.target > 0 ? Math.min(100, Math.round(g.progress / g.target * 100)) : 0;
+    return `<tr>
+      <td>${esc(g.name)}</td>
+      <td class="muted">${esc(g.activity || '—')}</td>
+      <td>${g.target} ${esc(g.metric)}</td>
+      <td class="muted">${g.cadence_days}d</td>
+      <td>
+        ${g.progress}/${g.target}
+        <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+      </td>
+    </tr>`;
+  }).join('');
+  return `<section>
+    <h2>Goals</h2>
+    <table>
+      <tr><th>Name</th><th>Activity</th><th>Target</th><th>Cadence</th><th>Progress</th></tr>
+      ${rows || '<tr><td colspan="5" class="muted">None.</td></tr>'}
+    </table>
+  </section>`;
+}
+
+async function patchActivity(id, patch) {
+  try {
+    const r = await fetch(`/api/activity/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(patch),
+    });
+    const d = await r.json();
+    if (d.error) { alert(d.error); return; }
+    // Reflect active change immediately without full reload
+    if ('active' in patch) {
+      const row = document.getElementById('act-' + id);
+      if (row) row.style.opacity = patch.active ? '1' : '0.45';
+      load();
+    }
+  } catch(e) {
+    alert('Save failed: ' + e);
+  }
+}
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
