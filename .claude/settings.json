@@ -33,7 +33,8 @@
       "Bash(docker run *)",
       "Bash(DOMAIN=verify.example.com docker compose config)",
       "Bash(sed -n '/^  caddy:/,/^  [a-z]/p')",
-      "Bash(docker rmi *)"
+      "Bash(docker rmi *)",
+      "Bash(git rm *)"
     ]
   }
 }

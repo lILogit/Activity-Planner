@@ -55,23 +55,23 @@ Telegram webhook auto-registers on startup, or register `/tg` manually.
 
 ## Deploy (Hostinger VPS)
 
-Docker Compose runs the app + a Caddy reverse proxy that auto-provisions TLS.
-Point your domain's A/AAAA records at the VPS, then:
+Docker Compose runs a single app container. The app listens on `127.0.0.1:8000`
+(loopback only), so run your own TLS reverse proxy on the host (nginx, Hostinger's
+panel proxy, etc.) forwarding `https://<DOMAIN>` → `http://127.0.0.1:8000`:
 
 ```bash
-cp .env.example .env          # set DOMAIN, PUBLIC_BASE_URL, and your keys
-docker compose up -d --build  # Caddy gets a Let's Encrypt cert; app boots
+cp .env.example .env          # set PUBLIC_BASE_URL (your proxy's https URL) + keys
+docker compose up -d --build
 ```
 
-- Caddy terminates TLS on 80/443 and proxies to the app on the internal network.
 - On boot, the app registers its Telegram webhook at `PUBLIC_BASE_URL/tg`
   (requires `TELEGRAM_BOT_TOKEN` + `PUBLIC_BASE_URL`).
 - The SQLite DB lives in the `data` volume (`/data/kairos.db`) and survives
   recreations. Back up with:
-  `docker run --rm -v $(docker compose config --volume data 2>/dev/null || echo kairos_data):/d alpine cat /d/kairos.db > kairos.db.bak`
+  `docker run --rm -v activity-planner_data:/d alpine cat /d/kairos.db > kairos.db.bak`
 
-Bare-metal alternative: `uvicorn app.main:app --host 0.0.0.0 --port 8000` behind
-your own TLS reverse proxy, as a systemd unit.
+Bare-metal alternative: `uvicorn app.main:app --host 0.0.0.0 --port 8000` as a
+systemd unit, behind the same TLS proxy.
 
 ## Notes / next
 

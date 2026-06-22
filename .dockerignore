@@ -25,8 +25,7 @@ __pycache__
 # Optional local-only data (the CSV import endpoint handles a missing file gracefully).
 GPS records.csv
 
-# Docs/tooling not needed at runtime by the app image.
-# Caddyfile is NOT ignored — Dockerfile.caddy COPYs it into the caddy image.
+# Docs/tooling not needed at runtime.
 *.md
 Dockerfile
 docker-compose.yml

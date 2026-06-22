@@ -1,9 +1,0 @@
-# Caddy with the Caddyfile baked into the image.
-#
-# We do NOT bind-mount ./Caddyfile: Hostinger's Docker manager doesn't sync
-# sibling files into the runtime dir, so a file bind-mount gets auto-created
-# as a directory and fails with "mount ... not a directory". Building it in
-# removes that host-path dependency entirely. {$DOMAIN} is still substituted
-# at runtime from the DOMAIN env var (set in docker-compose.yml).
-FROM caddy:2
-COPY Caddyfile /etc/caddy/Caddyfile
