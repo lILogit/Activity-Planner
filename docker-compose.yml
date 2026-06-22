@@ -14,10 +14,12 @@
 #   docker run --rm -v activity-planner_data:/d alpine cat /d/kairos.db > kairos.db.bak
 services:
   app:
-    build: .
+    build:
+      context: .
     image: kairos:latest
     container_name: kairos
-    env_file: .env
+    env_file:
+      - .env
     environment:
       # Absolute path → lands on the mounted volume. Overrides any DB_PATH in .env.
       DB_PATH: /data/kairos.db
