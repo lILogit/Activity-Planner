@@ -37,7 +37,11 @@
       "Bash(git rm *)",
       "Bash(gh pr create --base main --head add-docker-hostinger --title 'Remove Caddy; deploy as single app container behind host TLS proxy' --body ' *)",
       "Bash(gh pr *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://72.62.52.120/health)",
+      "Bash(curl -s -m 8 http://72.62.52.120/health)",
+      "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://72.62.52.120:8000/health)",
+      "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://example.com)"
     ]
   }
 }

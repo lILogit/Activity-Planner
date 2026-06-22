@@ -66,6 +66,7 @@ Browser ──GET /dashboard──▶ FastAPI ──GET /api/state──▶ live
 |---|---|---|
 | `app/main.py` | FastAPI app, all endpoints, GPS→session pipeline, lifespan | endpoints, ingest pipeline |
 | `app/dashboard.html` | Single-page dashboard (vanilla JS, fetches `/api/state`) | UI changes |
+| `app/tables.html` | Generic CRUD editor UI for `/tables` (drives `/api/{table}` endpoints) | inventory-editing UI |
 | `app/config.py` | env-driven `Settings` (keys, staypoint params, scoring weights, tz) | new config knob |
 | `app/db.py` | SQLite connect + `init_db` (runs `schema.sql` then `seed.sql`) | connection concerns |
 | `app/schema.sql` | DDL — all tables. `CREATE IF NOT EXISTS` (idempotent) | schema change |
@@ -78,7 +79,7 @@ Browser ──GET /dashboard──▶ FastAPI ──GET /api/state──▶ live
 | `app/planner.py` | `gather_conditions`, `_goal_gap`, `build_plan`, `build_and_send_plan` | planning logic |
 | `app/jobs.py` | APScheduler wiring for loops A & C + `kairos_window` scan | schedules |
 | `Dockerfile` | Image for the single uvicorn process (non-root, `/data` volume, `--proxy-headers`) | image / runtime deps |
-| `docker-compose.yml` | single app service, `data` volume, `/health` healthcheck, loopback port | Hostinger deploy |
+| `docker-compose.yml` | `traefik` service (TLS/routing) + `app` service, `data`/`traefik_data` volumes, `/health` healthcheck | Hostinger deploy |
 
 ### Endpoints
 
@@ -87,33 +88,53 @@ Browser ──GET /dashboard──▶ FastAPI ──GET /api/state──▶ live
 | `POST` | `/gps` | Overland GPS ingest |
 | `POST` | `/tg` | Telegram webhook |
 | `GET` | `/dashboard` | Web dashboard (HTML) |
+| `GET` | `/tables` | Generic CRUD editor UI for inventory tables (HTML) |
 | `GET` | `/api/state` | Dashboard data snapshot (JSON) |
 | `POST` | `/api/enrich` | Free-text → extract events → insert venues/goals |
 | `POST` | `/api/feedback` | Log star rating for a session, update posterior |
+| `PATCH` | `/api/activity/{id}` | Update an activity's `cluster`/`active` flag |
+| `GET/POST` | `/api/{table}` | Generic CRUD list/create over `activities`, `venues`, `rules`, `goals` (`_CRUD_TABLES` in `main.py`) |
+| `GET/PUT/DELETE` | `/api/{table}/{row_id}` | Generic CRUD get/update/delete for the same tables; deletes cascade/unlink FKs (see comments in `main.py`) |
+| `POST` | `/api/import/create-venues-from-sessions` | Backfill venues at session centroids so future GPS pings auto-match (closes the CSV-import → live-GPS gap) |
+| `POST` | `/api/import/gps-csv` | One-off idempotent import of `GPS records.csv` from the project root into `pings`/`sessions`/`feedback` |
 | `GET` | `/admin` | Lightweight counts + activity list |
 | `GET` | `/health` | `{"status":"ok"}` |
 
+Pipeline tables (`pings`, `sessions`, `feedback`, `plans`) are intentionally excluded
+from the generic CRUD surface — they're written by the GPS/scoring pipeline, not
+hand-edited.
+
 ### Deployment topology (Docker, Hostinger)
 
-One container — the single app process + its SQLite file. TLS is terminated by a
-reverse proxy you run **on the host** (nginx, Hostinger's panel proxy, etc.):
+Two containers in one compose stack: a `traefik` service terminates TLS (Let's
+Encrypt via the TLS-ALPN challenge) and routes by `Host()` to the `app` container
+over the internal Docker network, discovered via `traefik.*` labels:
 
 ```
-Internet ──443──▶ your TLS reverse proxy (on the host)
-                      │  forwards to http://127.0.0.1:8000
+Internet ──443──▶ traefik container  (Let's Encrypt cert, Host(`${DOMAIN_NAME}`) routing)
+                      │  routes to app:8000 over the docker network
                       ▼
                    app container  (uvicorn + APScheduler, single process)
-                      │  bound to 127.0.0.1:8000 — NOT exposed raw
+                      │  also published to 127.0.0.1:8000 — for VPS-local debugging only
                       ▼
                    data volume  ──(kairos.db persists across recreations)
 ```
 
-The app's port is published as `127.0.0.1:8000:8000` (loopback only), so it isn't
-reachable raw from the internet — front it with your proxy. uvicorn runs with
-`--proxy-headers`, so it trusts `X-Forwarded-*` from that proxy. On boot, `lifespan`
-calls Telegram `setWebhook` with `PUBLIC_BASE_URL + "/tg"`, so set `PUBLIC_BASE_URL`
-to the public `https://` URL your proxy serves. Don't run a second app replica:
-SQLite + the in-process scheduler assume a single writer.
+`traefik` owns host ports 80/443; the app's own port publish
+(`127.0.0.1:8000:8000`) is loopback-only and exists purely so you can `curl
+localhost:8000` from the VPS directly — it is never the public entrypoint.
+uvicorn runs with `--proxy-headers`, so it trusts `X-Forwarded-*` from Traefik.
+On boot, `lifespan` calls Telegram `setWebhook` with `PUBLIC_BASE_URL + "/tg"`,
+so set `PUBLIC_BASE_URL` to a literal `https://${DOMAIN_NAME}` value in `.env`
+(env_file values aren't variable-expanded, so it can't reference `${DOMAIN_NAME}`
+directly — see `.env.example`). Don't run a second app replica: SQLite + the
+in-process scheduler assume a single writer.
+
+A prior iteration ran a host-level reverse proxy (nginx) instead of a
+containerized one — this was superseded in favor of mirroring an already-working
+Traefik pattern from another deployment on the same Hostinger account. If you
+add another container-based service later, give it its own `Host()` rule and
+join the same `traefik` service rather than standing up a second proxy.
 
 ---
 
@@ -185,33 +206,12 @@ cp .env.example .env          # runs keyless; fill keys to enable features
 # Expose locally via ngrok (required for Telegram webhook)
 ngrok http --domain=<your-domain> 8000
 
-# Smoke test (no keys, no network)
-.venv/bin/python3 - <<'EOF'
-import os, tempfile, time
-os.environ["DB_PATH"] = tempfile.mktemp(suffix=".db")
-from app.db import init_db
-from app.scoring import Conditions, fit, update_posterior, rule_effect
-from app.geo import segment_staypoints
-init_db(seed=True)
-from app.db import get_conn
-with get_conn() as c:
-    golf = dict(c.execute("SELECT * FROM activities WHERE name='golf'").fetchone())
-    rules = [dict(r) for r in c.execute("SELECT * FROM rules").fetchall()]
-cond_clear = Conditions(season="spring", daytime=True, temp=18, weather_main="Clear")
-cond_rain  = Conditions(season="spring", daytime=True, temp=18, weather_main="Rain")
-assert fit(golf, cond_clear) > 0.8
-blocked, _ = rule_effect(golf["id"], rules, cond_rain)
-assert blocked
-a, b = 1.0, 1.0
-for s in (5, 5, 4): a, b = update_posterior(a, b, s)
-assert a / (a + b) > 0.7
-now = int(time.time())
-pings = [{"id": i, "ts": now + i*60, "lat": 49.96, "lon": 14.38} for i in range(15)]
-pings += [{"id": 99, "ts": now + 15*60, "lat": 49.97, "lon": 14.4}]
-res = segment_staypoints(pings, 150, 720)
-assert len(res.closed) == 1
-print("All smoke tests passed.")
-EOF
+# Smoke test (no keys, no network) — fit/block/posterior/staypoint-segmentation asserts
+.venv/bin/python3 tests/smoke.py
+
+# E2E probe (no keys; requires the dev server running on :8000) — walks all three
+# loops over real HTTP: anchor suppression, GPS→session→feedback, plan approval
+.venv/bin/python3 tests/e2e_probe.py
 
 # Trigger a plan immediately (bypasses 06:30 scheduler)
 .venv/bin/python3 -c "import asyncio; from app.planner import build_and_send_plan; asyncio.run(build_and_send_plan('daily'))"
@@ -226,14 +226,16 @@ curl -s -X POST http://localhost:8000/api/enrich \
   -H "Content-Type: application/json" \
   -d '{"text": "Golf tournament in Hluboká nad Vltavou on 19.6.2026"}'
 
-# Deploy (Hostinger VPS) — single app container behind your own TLS proxy
-cp .env.example .env          # set PUBLIC_BASE_URL (your proxy's https URL) + keys
-docker compose up -d --build  # app boots; Telegram webhook registers on startup
+# Deploy (Hostinger VPS) — Traefik (TLS + routing) + app, one compose stack
+cp .env.example .env          # set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL (literal https://<DOMAIN_NAME>) + keys
+docker compose up -d --build  # traefik obtains its cert; app boots; Telegram webhook registers on startup
+docker compose logs -f traefik   # watch ACME/cert issuance
 docker compose logs -f app
 docker compose ps
 
-# Front it on the host:  https://<DOMAIN>  ->  http://127.0.0.1:8000
-# (app is bound to loopback — not reachable raw from the internet)
+# Traefik owns ports 80/443 and routes Host(`${DOMAIN_NAME}`) to the app over
+# the docker network. The app's own 127.0.0.1:8000 publish is loopback-only,
+# for local debugging on the VPS — never the public entrypoint.
 
 # The SQLite DB lives in the `data` volume (/data/kairos.db), set via
 # compose `environment` (overrides any DB_PATH in .env). Backup the volume:
@@ -249,8 +251,11 @@ docker run --rm -v activity-planner_data:/d alpine cat /d/kairos.db > kairos.db.
 
 `ANTHROPIC_API_KEY` (empty ⇒ heuristic mode) · `MODEL_FAST`=`claude-haiku-4-5-20251001`
 · `MODEL_SMART`=`claude-sonnet-4-6` · `OPENWEATHER_API_KEY` · `LOCATIONIQ_API_KEY` ·
-`TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` · `PUBLIC_BASE_URL` (public https URL your
-TLS proxy serves; the app registers its webhook at `PUBLIC_BASE_URL/tg`) ·
+`TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` · `PUBLIC_BASE_URL` (public https URL,
+literally `https://${DOMAIN_NAME}` — not expanded by env_file, so spell it out;
+the app registers its webhook at `PUBLIC_BASE_URL/tg`) · `DOMAIN_NAME` (compose-only,
+read by `docker-compose.yml`'s Traefik `Host()` rule and cert request) ·
+`SSL_EMAIL` (compose-only, Let's Encrypt expiry/revocation contact) ·
 `DB_PATH` (compose sets `/data/kairos.db`; bare-metal defaults to `kairos.db`) ·
 `STAYPOINT_RADIUS_M` (150) · `STAYPOINT_MIN_DWELL_S` (720) · scoring weights
 `W_PREF/W_FIT/W_PROG/W_EXPL` · `TZ`=`Europe/Prague`.
