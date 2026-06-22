@@ -78,6 +78,7 @@ Browser ──GET /dashboard──▶ FastAPI ──GET /api/state──▶ live
 | `app/planner.py` | `gather_conditions`, `_goal_gap`, `build_plan`, `build_and_send_plan` | planning logic |
 | `app/jobs.py` | APScheduler wiring for loops A & C + `kairos_window` scan | schedules |
 | `Dockerfile` | Image for the single uvicorn process (non-root, `/data` volume) | image / runtime deps |
+| `Dockerfile.caddy` | `caddy:2` + the Caddyfile baked in (NOT bind-mounted — Hostinger doesn't sync sibling files to its runtime dir) | Caddy image |
 | `docker-compose.yml` | app + Caddy (auto-TLS), volumes, healthcheck | Hostinger deploy |
 | `Caddyfile` | Caddy reverse proxy; `{$DOMAIN}` → `app:8000`, auto Let's Encrypt | TLS / domain |
 
