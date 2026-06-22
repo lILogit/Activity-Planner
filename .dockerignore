@@ -1,0 +1,34 @@
+# Build context — keep the image small and secrets out.
+.git
+.gitignore
+.github
+.claude
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.egg-info
+
+# Local SQLite DBs + WAL — the container uses the /data volume instead.
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets never go into the image (compose injects .env at runtime).
+.env
+.env.*
+!.env.example
+
+# Optional local-only data (the CSV import endpoint handles a missing file gracefully).
+GPS records.csv
+
+# Docs/tooling not needed at runtime.
+*.md
+Dockerfile
+docker-compose.yml
+Caddyfile
+.dockerignore
+tests

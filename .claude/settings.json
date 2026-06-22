@@ -25,7 +25,11 @@
       "Bash(curl -s -X POST http://localhost:8000/api/import/create-venues-from-sessions)",
       "Bash(curl -s -X POST http://localhost:8000/gps -H \"Content-Type: application/json\" -d '{\"\"locations\"\":[{\"\"geometry\"\":{\"\"coordinates\"\":[14.384,49.962]},\"\"properties\"\":{\"\"timestamp\"\":\"\"2026-06-15T08:00:00Z\"\",\"\"altitude\"\":200}}]}')",
       "Bash(curl -s -X POST http://localhost:8000/gps -H \"Content-Type: application/json\" -d '{\"\"locations\"\":[{\"\"geometry\"\":{\"\"coordinates\"\":[14.384,49.962]},\"\"properties\"\":{\"\"timestamp\"\":\"\"2026-06-15T09:00:00Z\"\"}}]}')",
-      "Bash(curl -s -X POST http://localhost:8000/gps -H \"Content-Type: application/json\" -d '{\"\"locations\"\":[{\"\"geometry\"\":{\"\"coordinates\"\":[14.384,49.962]},\"\"properties\"\":{\"\"timestamp\"\":\"\"2026-06-15T09:30:00Z\"\",\"\"altitude\"\":200}}]}')"
+      "Bash(curl -s -X POST http://localhost:8000/gps -H \"Content-Type: application/json\" -d '{\"\"locations\"\":[{\"\"geometry\"\":{\"\"coordinates\"\":[14.384,49.962]},\"\"properties\"\":{\"\"timestamp\"\":\"\"2026-06-15T09:30:00Z\"\",\"\"altitude\"\":200}}]}')",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(docker build *)",
+      "Bash(set -e)"
     ]
   }
 }

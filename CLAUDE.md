@@ -77,6 +77,9 @@ Browser ──GET /dashboard──▶ FastAPI ──GET /api/state──▶ live
 | `app/telegram.py` | send plan/feedback, parse webhook, log ⭐ → posterior | bot I/O |
 | `app/planner.py` | `gather_conditions`, `_goal_gap`, `build_plan`, `build_and_send_plan` | planning logic |
 | `app/jobs.py` | APScheduler wiring for loops A & C + `kairos_window` scan | schedules |
+| `Dockerfile` | Image for the single uvicorn process (non-root, `/data` volume) | image / runtime deps |
+| `docker-compose.yml` | app + Caddy (auto-TLS), volumes, healthcheck | Hostinger deploy |
+| `Caddyfile` | Caddy reverse proxy; `{$DOMAIN}` → `app:8000`, auto Let's Encrypt | TLS / domain |
 
 ### Endpoints
 
@@ -90,6 +93,25 @@ Browser ──GET /dashboard──▶ FastAPI ──GET /api/state──▶ live
 | `POST` | `/api/feedback` | Log star rating for a session, update posterior |
 | `GET` | `/admin` | Lightweight counts + activity list |
 | `GET` | `/health` | `{"status":"ok"}` |
+
+### Deployment topology (Docker, Hostinger)
+
+Two containers, but still **one app process + one datastore** — Caddy is only a TLS
+terminator, not application logic, so it doesn't violate Golden Rule #1:
+
+```
+Internet ──80/443──▶ Caddy (auto Let's Encrypt for {$DOMAIN})
+                        │  reverse_proxy, sets X-Forwarded-*
+                        ▼ (internal docker net, port 8000)
+                     app (uvicorn + APScheduler, single process)
+                        │  sqlite3.connect("/data/kairos.db")
+                        ▼
+                     data volume  ──(kairos.db persists across recreations)
+```
+
+On boot, `lifespan` calls Telegram `setWebhook` with `PUBLIC_BASE_URL + "/tg"` — so
+`PUBLIC_BASE_URL` must be the public `https://<DOMAIN>` Caddy serves. Don't run a
+second app replica: SQLite + the in-process scheduler assume a single writer.
 
 ---
 
@@ -202,9 +224,18 @@ curl -s -X POST http://localhost:8000/api/enrich \
   -H "Content-Type: application/json" \
   -d '{"text": "Golf tournament in Hluboká nad Vltavou on 19.6.2026"}'
 
-# Deploy (Hostinger VPS, behind TLS reverse proxy)
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-# Backup: cp kairos.db kairos.db.bak
+# Deploy (Hostinger VPS) — Docker Compose: app + Caddy (auto-TLS)
+cp .env.example .env          # set DOMAIN, PUBLIC_BASE_URL, and your keys
+docker compose up -d --build  # Caddy gets a Let's Encrypt cert; app boots
+docker compose logs -f app    # follow startup (Telegram webhook registers here)
+docker compose ps             # both services + healthcheck status
+
+# The SQLite DB lives in the `data` volume (/data/kairos.db), set via
+# compose `environment` (overrides any DB_PATH in .env). Backup the volume:
+docker run --rm -v kairos_data:/d alpine cat /d/kairos.db > kairos.db.bak
+
+# Bare-metal alternative (behind your own TLS reverse proxy):
+# uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 ---
@@ -213,11 +244,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 `ANTHROPIC_API_KEY` (empty ⇒ heuristic mode) · `MODEL_FAST`=`claude-haiku-4-5-20251001`
 · `MODEL_SMART`=`claude-sonnet-4-6` · `OPENWEATHER_API_KEY` · `LOCATIONIQ_API_KEY` ·
-`TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` · `PUBLIC_BASE_URL` · `STAYPOINT_RADIUS_M`
-(150) · `STAYPOINT_MIN_DWELL_S` (720) · scoring weights `W_PREF/W_FIT/W_PROG/W_EXPL` ·
-`TZ`=`Europe/Prague`.
+`TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` · `PUBLIC_BASE_URL` (https URL the Telegram
+webhook points at) · `DOMAIN` (Caddy auto-TLS host; consumed by `Caddyfile` via
+`{$DOMAIN}`) · `DB_PATH` (compose sets `/data/kairos.db`; bare-metal defaults to
+`kairos.db`) · `STAYPOINT_RADIUS_M` (150) · `STAYPOINT_MIN_DWELL_S` (720) · scoring
+weights `W_PREF/W_FIT/W_PROG/W_EXPL` · `TZ`=`Europe/Prague`.
 
 After changing `.env`, restart the server — pydantic-settings reads env only at startup.
+For Docker: `docker compose up -d` re-creates the container and re-reads `.env`.
 
 ---
 

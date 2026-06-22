@@ -1,0 +1,52 @@
+# KAIROS on Hostinger VPS — app + Caddy (auto-TLS via Let's Encrypt).
+#
+#   1. cp .env.example .env   → fill keys, DOMAIN, PUBLIC_BASE_URL
+#   2. docker compose up -d --build
+#   3. Caddy gets a cert for DOMAIN; on boot the app registers its Telegram webhook.
+#
+# The SQLite DB lives in the `data` volume so it survives image recreations.
+# Back it up with:  docker compose exec app cp /data/kairos.db /data/kairos.db.bak
+# (or `docker run --rm -v kairos_data:/d alpine cat /d/kairos.db > kairos.db.bak`)
+services:
+  app:
+    build: .
+    image: kairos:latest
+    container_name: kairos
+    env_file: .env
+    environment:
+      # Absolute path → lands on the mounted volume. Overrides any DB_PATH in .env.
+      DB_PATH: /data/kairos.db
+      TZ: ${TZ:-Europe/Prague}
+    volumes:
+      - data:/data
+    expose:
+      - "8000"          # internal docker network only — Caddy is the public face
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  caddy:
+    image: caddy:2
+    container_name: kairos-caddy
+    depends_on:
+      - app
+    environment:
+      # Caddyfile reads {$DOMAIN}. Fail fast if it isn't set in .env.
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env, e.g. kairos.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # ACME assets + certs — keep across restarts
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:
