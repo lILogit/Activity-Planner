@@ -1,12 +1,17 @@
-# KAIROS on Hostinger VPS — app + Caddy (auto-TLS via Let's Encrypt).
+# KAIROS on Hostinger VPS — single app container behind your own TLS proxy.
 #
-#   1. cp .env.example .env   → fill keys, DOMAIN, PUBLIC_BASE_URL
+#   1. cp .env.example .env   → fill keys + PUBLIC_BASE_URL (your proxy's https URL)
 #   2. docker compose up -d --build
-#   3. Caddy gets a cert for DOMAIN; on boot the app registers its Telegram webhook.
+#
+# The app listens on :8000 and is bound to the HOST LOOPBACK (127.0.0.1:8000),
+# so it is NOT reachable raw from the internet. Put a TLS reverse proxy on the
+# host (nginx or Hostinger's panel proxy) in front of it:
+#     https://<DOMAIN>   →   http://127.0.0.1:8000
+# Set PUBLIC_BASE_URL to that https URL so the Telegram webhook registers on boot.
 #
 # The SQLite DB lives in the `data` volume so it survives image recreations.
-# Back it up with:  docker compose exec app cp /data/kairos.db /data/kairos.db.bak
-# (or `docker run --rm -v kairos_data:/d alpine cat /d/kairos.db > kairos.db.bak`)
+# Back it up with:
+#   docker run --rm -v activity-planner_data:/d alpine cat /d/kairos.db > kairos.db.bak
 services:
   app:
     build: .
@@ -19,8 +24,8 @@ services:
       TZ: ${TZ:-Europe/Prague}
     volumes:
       - data:/data
-    expose:
-      - "8000"          # internal docker network only — Caddy is the public face
+    ports:
+      - "127.0.0.1:8000:8000"   # loopback only — front with your own TLS proxy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status==200 else 1)"]
@@ -29,24 +34,5 @@ services:
       retries: 3
       start_period: 20s
 
-  caddy:
-    image: caddy:2
-    container_name: kairos-caddy
-    depends_on:
-      - app
-    environment:
-      # Caddyfile reads {$DOMAIN}. Fail fast if it isn't set in .env.
-      DOMAIN: ${DOMAIN:?set DOMAIN in .env, e.g. kairos.example.com}
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data          # ACME assets + certs — keep across restarts
-      - caddy_config:/config
-    restart: unless-stopped
-
 volumes:
   data:
-  caddy_data:
-  caddy_config:

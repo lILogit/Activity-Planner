@@ -30,7 +30,7 @@ USER kairos
 EXPOSE 8000
 
 # Single uvicorn process. APScheduler runs in-process — no separate worker.
-# --proxy-headers: trust Caddy's X-Forwarded-* (Caddy is the only upstream).
+# --proxy-headers: trust the host TLS reverse proxy's X-Forwarded-* headers.
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", "--port", "8000", \
      "--proxy-headers", "--forwarded-allow-ips=*"]

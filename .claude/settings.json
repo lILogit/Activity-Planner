@@ -29,7 +29,15 @@
       "Bash(docker --version)",
       "Bash(docker compose *)",
       "Bash(docker build *)",
-      "Bash(set -e)"
+      "Bash(set -e)",
+      "Bash(docker run *)",
+      "Bash(DOMAIN=verify.example.com docker compose config)",
+      "Bash(sed -n '/^  caddy:/,/^  [a-z]/p')",
+      "Bash(docker rmi *)",
+      "Bash(git rm *)",
+      "Bash(gh pr create --base main --head add-docker-hostinger --title 'Remove Caddy; deploy as single app container behind host TLS proxy' --body ' *)",
+      "Bash(gh pr *)",
+      "Bash(git fetch *)"
     ]
   }
 }

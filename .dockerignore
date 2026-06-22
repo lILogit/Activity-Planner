@@ -29,6 +29,5 @@ GPS records.csv
 *.md
 Dockerfile
 docker-compose.yml
-Caddyfile
 .dockerignore
 tests
