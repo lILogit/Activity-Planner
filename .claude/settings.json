@@ -41,7 +41,9 @@
       "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://72.62.52.120/health)",
       "Bash(curl -s -m 8 http://72.62.52.120/health)",
       "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://72.62.52.120:8000/health)",
-      "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://example.com)"
+      "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://example.com)",
+      "Bash(curl -s -m 10 https://srv1169048.hstgr.cloud/admin)",
+      "Bash(curl -s -m 10 https://srv1169048.hstgr.cloud/health)"
     ]
   }
 }

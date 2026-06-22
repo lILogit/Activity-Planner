@@ -1,21 +1,7 @@
 # KAIROS on Hostinger VPS — Traefik terminates TLS (Let's Encrypt) and routes
-# Host(`${DOMAIN_NAME}`) to the app container; the app is never exposed raw.
-#
-#   1. cp .env.example .env   → fill keys + DOMAIN_NAME + SSL_EMAIL
-#   2. docker compose up -d --build
-#   3. Set PUBLIC_BASE_URL=https://${DOMAIN_NAME} (literal value, not interpolated)
-#      in .env so the Telegram webhook registers on boot.
-#
-# Traefik owns ports 80/443 on the host and discovers the app via the
-# `traefik.*` labels below — the app itself only publishes its port to
-# 127.0.0.1 for local debugging (curl from the VPS), never to the internet.
-#
-# The SQLite DB lives in the `data` volume so it survives image recreations.
-# Back it up with:
-#   docker run --rm -v activity-planner_data:/d alpine cat /d/kairos.db > kairos.db.bak
 services:
   traefik:
-    image: "traefik:v3.1"
+    image: "traefik"
     container_name: kairos-traefik
     restart: unless-stopped
     command:
