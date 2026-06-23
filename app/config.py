@@ -50,5 +50,11 @@ class Settings(BaseSettings):
     # Debug
     debug_gps: bool = False   # set DEBUG_GPS=true to send a Telegram message on every ping
 
+    # Dashboard auth — gates ONLY /dashboard and /tables; /api/* and /admin stay open.
+    dashboard_username: str = "admin"
+    dashboard_password: str = ""          # EMPTY = auth DISABLED (keyless mode preserved)
+    session_secret: str = ""              # EMPTY = random per-startup secret (sessions won't survive restart)
+    session_cookie_secure: bool = False   # True behind TLS (prod) → cookie Secure flag
+
 
 settings = Settings()

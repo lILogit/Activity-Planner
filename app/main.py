@@ -17,10 +17,15 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
+from .auth import (
+    auth_enabled, check_credentials, get_session_secret,
+    render_login_html, require_login,
+)
 from .db import get_conn, init_db
 from .enrich import fetch_weather, reverse_geocode
 from .geo import haversine_m, segment_staypoints
@@ -48,6 +53,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="KAIROS", lifespan=lifespan)
+
+# Cookie-session auth for the dashboard HTML pages. Gates ONLY /dashboard + /tables;
+# /api/*, /admin, /gps, /tg, /health stay open. When DASHBOARD_PASSWORD is unset,
+# auth is disabled (require_login short-circuits) and the app behaves as before.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=get_session_secret(),
+    session_cookie="kairos_session",
+    same_site="lax",
+    https_only=settings.session_cookie_secure,
+    max_age=14 * 24 * 3600,
+)
 
 
 # ---------------------------- GPS ingest ----------------------------
@@ -412,14 +429,46 @@ async def api_state():
     }
 
 
+# ------------------------------ auth (dashboard login) ------------------------------
+
+@app.get("/login")
+async def login_form():
+    if not auth_enabled():
+        return RedirectResponse("/dashboard", status_code=303)
+    return HTMLResponse(render_login_html())
+
+
+@app.post("/login")
+async def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    if not auth_enabled():
+        return RedirectResponse("/dashboard", status_code=303)
+    if check_credentials(username, password):
+        request.session["user"] = settings.dashboard_username
+        return RedirectResponse("/dashboard", status_code=303)
+    return HTMLResponse(render_login_html("Invalid username or password."), status_code=401)
+
+
+@app.api_route("/logout", methods=["GET", "POST"])
+async def logout(request: Request):
+    # Both verbs so a header <a href="/logout"> link works without JS.
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
+# ------------------------------ dashboard ------------------------------
+
 @app.get("/dashboard")
-async def dashboard():
+async def dashboard(_: None = Depends(require_login)):
     html = Path(__file__).with_name("dashboard.html").read_text()
     return HTMLResponse(html)
 
 
 @app.get("/tables")
-async def tables_page():
+async def tables_page(_: None = Depends(require_login)):
     html = Path(__file__).with_name("tables.html").read_text()
     return HTMLResponse(html)
 

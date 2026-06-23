@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KAIROS — Log in</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --border:#2a2d3e; --text:#e2e8f0; --muted:#8892a4; --accent:#6c8ebf; --err:#f87171; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; font-size:14px; display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  form { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:24px; width:100%; max-width:320px; }
+  h1 { font-size:16px; font-weight:700; letter-spacing:.05em; color:var(--accent); margin-bottom:16px; text-align:center; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin:12px 0 4px; }
+  input { width:100%; background:#1e2235; border:1px solid var(--border); border-radius:6px; color:var(--text); padding:8px 10px; font-size:14px; font-family:inherit; }
+  input:focus { outline:none; border-color:var(--accent); }
+  button { width:100%; margin-top:16px; background:var(--accent); color:#fff; border:none; border-radius:6px; padding:10px; font-size:14px; font-weight:600; cursor:pointer; }
+  .error { color:var(--err); font-size:12px; margin-top:12px; text-align:center; min-height:16px; }
+</style>
+</head>
+<body>
+  <form method="post" action="/login">
+    <h1>KAIROS</h1>
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Log in</button>
+    <div class="error">{{error}}</div>
+  </form>
+</body>
+</html>
