@@ -1,8 +1,18 @@
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Env file is chosen per environment:
+    #   dev  → `KAIROS_ENV_FILE=.env.test uvicorn ...` (reads .env.test directly)
+    #   prod → docker-compose injects .env.prod via `env_file` (this setting is
+    #          moot there; the vars arrive as real env vars)
+    # If the named file is absent, pydantic-settings ignores it and falls back to
+    # env vars + defaults (so the app still runs keyless).
+    model_config = SettingsConfigDict(
+        env_file=os.environ.get("KAIROS_ENV_FILE", ".env"), extra="ignore"
+    )
 
     db_path: str = "kairos.db"
 

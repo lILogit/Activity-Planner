@@ -1,4 +1,6 @@
-.env
+# Env files hold real secrets — never commit. .env.example is the safe template.
+.env*
+!.env.example
 GPS records.csv
 *.db
 *.db-shm

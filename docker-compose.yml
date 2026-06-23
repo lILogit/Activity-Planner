@@ -28,7 +28,7 @@ services:
     container_name: kairos
     restart: unless-stopped
     env_file:
-      - .env
+      - .env.prod
     environment:
       # Absolute path → lands on the mounted volume. Overrides any DB_PATH in .env.
       DB_PATH: /data/kairos.db

@@ -144,7 +144,8 @@ page, GPS module, and Telegram are all available in **both**.
 
 | Surface | Development (local bare-metal) | Production (Hostinger, Traefik) |
 |---|---|---|
-| **Run** | `uvicorn app.main:app --reload` on `:8000` | `docker compose up -d --build` (traefik + app) |
+| **Run** | `KAIROS_ENV_FILE=.env.test uvicorn … --reload` | `docker compose up -d --build` (traefik + app) |
+| **Env file** | `.env.test` (gitignored) | `.env.prod` (gitignored; compose `env_file`) |
 | **Web** (`/dashboard`, `/tables`) | `http://localhost:8000/dashboard` | `https://${DOMAIN_NAME}/dashboard` |
 | **GPS** (Overland `POST /gps`) | `https://<ngrok>.ngrok-free.app/gps` | `https://${DOMAIN_NAME}/gps` |
 | **Telegram** webhook (`/tg`) | `PUBLIC_BASE_URL=https://<ngrok>.ngrok-free.app` | `PUBLIC_BASE_URL=https://${DOMAIN_NAME}` |
@@ -221,10 +222,11 @@ Routing: `NOW` (fit ≥ 0.6, unblocked) · `NEXT` (fit 0.2–0.6) · `PARK`
 # Setup
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # runs keyless; fill keys to enable features
+cp .env.example .env.test     # dev env (gitignored); fill keys to enable features
+cp .env.example .env.prod     # prod env (gitignored); set DOMAIN_NAME/SSL_EMAIL/keys
 
-# Dev server (auto-reload on file changes)
-.venv/bin/uvicorn app.main:app --reload --port 8000
+# Dev server (auto-reload). KAIROS_ENV_FILE selects .env.test (config.py reads it):
+KAIROS_ENV_FILE=.env.test .venv/bin/uvicorn app.main:app --reload --port 8000
 
 # Expose locally via ngrok (required for Telegram webhook)
 ngrok http --domain=<your-domain> 8000
@@ -250,8 +252,8 @@ curl -s -X POST http://localhost:8000/api/enrich \
   -d '{"text": "Golf tournament in Hluboká nad Vltavou on 19.6.2026"}'
 
 # Deploy (Hostinger VPS) — Traefik (TLS + routing) + app, one compose stack
-cp .env.example .env          # set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL (literal https://<DOMAIN_NAME>) + keys
-docker compose up -d --build  # traefik obtains its cert; app boots; Telegram webhook registers on startup
+# Edit .env.prod: set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL (literal https://<DOMAIN_NAME>) + keys
+docker compose up -d --build  # compose injects .env.prod; traefik gets its cert; app boots; Telegram webhook registers on startup
 docker compose logs -f traefik   # watch ACME/cert issuance
 docker compose logs -f app
 docker compose ps
@@ -285,6 +287,11 @@ read by `docker-compose.yml`'s Traefik `Host()` rule and cert request) ·
 
 After changing `.env`, restart the server — pydantic-settings reads env only at startup.
 For Docker: `docker compose up -d` re-creates the container and re-reads `.env`.
+
+**Env files are per environment:** `.env.test` (dev, loaded via
+`KAIROS_ENV_FILE=.env.test`) and `.env.prod` (prod, injected by compose `env_file`).
+`.env.example` is the committed template; the two real files are **gitignored**
+(they hold secrets).
 
 ---
 

@@ -49,7 +49,8 @@ page, GPS module, and Telegram are all available in **both**.
 
 | Surface | Development (local) | Production (Hostinger) |
 |---|---|---|
-| **Run** | bare-metal `uvicorn ... --reload` on `:8000` | `docker compose up -d --build` (Traefik + app) |
+| **Run** | `KAIROS_ENV_FILE=.env.test uvicorn ... --reload` on `:8000` | `docker compose up -d --build` (Traefik + app) |
+| **Env file** | `.env.test` (via `KAIROS_ENV_FILE`) | `.env.prod` (compose `env_file`) |
 | **Web** | `http://localhost:8000/dashboard` | `https://${DOMAIN_NAME}/dashboard` |
 | **GPS** (Overland) | `https://<ngrok>.ngrok-free.app/gps` | `https://${DOMAIN_NAME}/gps` |
 | **Telegram** | `PUBLIC_BASE_URL=https://<ngrok>.ngrok-free.app` | `PUBLIC_BASE_URL=https://${DOMAIN_NAME}` |
@@ -59,8 +60,8 @@ page, GPS module, and Telegram are all available in **both**.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # fill keys; runs keyless for local testing
-uvicorn app.main:app --reload --port 8000
+cp .env.example .env.test     # dev env (gitignored); fill keys, or run keyless
+KAIROS_ENV_FILE=.env.test uvicorn app.main:app --reload --port 8000
 ```
 
 The web dashboard is at `http://localhost:8000/dashboard`. Telegram and the
@@ -69,7 +70,7 @@ doesn't have — expose it with ngrok in a second terminal:
 
 ```bash
 ngrok http --domain=<your-ngrok-domain> 8000
-# then set in .env:  PUBLIC_BASE_URL=https://<your-ngrok-domain>
+# then set in .env.test:  PUBLIC_BASE_URL=https://<your-ngrok-domain>
 # and restart uvicorn so it re-registers the Telegram webhook
 ```
 
@@ -82,8 +83,8 @@ auto-provisions a Let's Encrypt cert for `${DOMAIN_NAME}`, and routes
 `Host(${DOMAIN_NAME})` to the app over the internal Docker network.
 
 ```bash
-cp .env.example .env          # set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL (literal https://<DOMAIN_NAME>) + keys
-docker compose up -d --build  # Traefik gets its cert; app boots; Telegram webhook registers on startup
+# edit .env.prod: set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL (literal https://<DOMAIN_NAME>) + keys
+docker compose up -d --build  # compose injects .env.prod; Traefik gets its cert; app boots; webhook registers on startup
 docker compose logs -f traefik   # watch ACME/cert issuance
 ```
 

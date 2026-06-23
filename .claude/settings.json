@@ -6,17 +6,12 @@
       "Bash(curl -s http://localhost:8000/health)",
       "Bash(curl -s http://localhost:8000/admin)",
       "Bash(pkill -f \"uvicorn app.main:app\")",
-      "Bash(curl -s \"https://api.telegram.org/bot8022122256:AAF9EkCzBDsLSuzrSYYmfGpDaoZGX-vJsUs/getWebhookInfo\")",
       "Bash(curl -s http://localhost:4040/api/tunnels)",
       "Bash(pkill -f \"ngrok\")",
       "Bash(curl -s \"https://pauline-rudimentary-jimmy.ngrok-free.dev/health\")",
-      "Bash(curl -s \"https://api.telegram.org/bot820879491:AAFc8cv4bjjXWtFE2lXfc5fNVzUEqEaBvrE/getWebhookInfo\")",
-      "Bash(curl -s \"https://api.telegram.org/bot8820879491:AAFc8cv4bjjXWtFE2lXfc5fNVzUEqEaBvrE/getMe\")",
-      "Bash(curl -s \"https://api.telegram.org/bot8820879491:AAFc8cv4bjjXWtFE2lXfc5fNVzUEqEaBvrE/getWebhookInfo\")",
       "Bash(curl -s http://localhost:8000/api/state)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/dashboard)",
-      "Bash(curl -s -X POST http://localhost:8000/api/enrich -H \"Content-Type: application/json\" -d '{\"\"text\"\": \"\"Golf tournament in Hluboká nad Vltavou on 19.6.2026\"\"}')",
-      "Bash(curl -s \"https://us1.locationiq.com/v1/search?key=pk.2957d1ea34659e13e7635022b1eebab&q=Hlubok%C3%A1+nad+Vltavou+golf&format=json&limit=1\")",
+      "Bash(curl -s -X POST http://localhost:8000/api/enrich -H \"Content-Type: application/json\" -d '{\"\"text\"\": \"\"Golf tournament in Hlubok\u00e1 nad Vltavou on 19.6.2026\"\"}')",
       "Bash(.venv/bin/python3 -c \":*)",
       "Read(//Users/jirikouba/Documents/**)",
       "Bash(curl -s -X POST http://localhost:8000/api/import/gps-csv)",
@@ -43,7 +38,18 @@
       "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://72.62.52.120:8000/health)",
       "Bash(curl -s -m 8 -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://example.com)",
       "Bash(curl -s -m 10 https://srv1169048.hstgr.cloud/admin)",
-      "Bash(curl -s -m 10 https://srv1169048.hstgr.cloud/health)"
+      "Bash(curl -s -m 10 https://srv1169048.hstgr.cloud/health)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(python3 -m venv .venv)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -c \"import fastapi, uvicorn, astral, anthropic, apscheduler, pydantic_settings; print\\('imports OK'\\)\")",
+      "Bash(.venv/bin/uvicorn app.main:app --port 8000)",
+      "Bash(git check-ignore *)",
+      "Bash(KAIROS_ENV_FILE=.env.test .venv/bin/uvicorn app.main:app --port 8000)",
+      "Bash(.venv/bin/python -)",
+      "Bash(grep -nE \"bot[0-9]{6,}:|pk\\\\.[a-f0-9]{6}|AAFc8cv4bjjX|AAF9EkCzBD|2957d1ea34659\" .claude/settings.json)",
+      "Bash(.venv/bin/python -c \"import json; json.load\\(open\\('.claude/settings.json'\\)\\); print\\('valid JSON'\\)\")"
     ]
   }
 }
