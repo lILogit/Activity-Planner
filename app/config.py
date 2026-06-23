@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     tz: str = "Europe/Prague"
 
     # Debug
-    debug_gps: bool = False   # set DEBUG_GPS=true to send a Telegram message on every ping
+    debug_gps: bool = False    # set DEBUG_GPS=true to send a verbose Telegram dump on every ping
+    debug_trace: bool = False  # set DEBUG_TRACE=true to trace all pipeline events to Telegram
 
     # Dashboard auth — gates ONLY /dashboard and /tables; /api/* and /admin stay open.
     dashboard_username: str = "admin"

@@ -30,7 +30,15 @@ async def send_message(text: str, keyboard: list[list[dict]] | None = None) -> d
     return await _call("sendMessage", payload)
 
 
+async def trace(event: str) -> None:
+    """Send a one-line pipeline trace to Telegram. Only fires when DEBUG_TRACE=true."""
+    if not settings.debug_trace:
+        return
+    await send_message(f"[TRACE] {event}")
+
+
 async def send_plan(plan_id: int, summary: str, picks: list[dict]) -> dict:
+    await trace(f"📋 Plan #{plan_id}  {' · '.join(p['name'] + ' ' + p['route'] for p in picks)}")
     lines = [summary, ""]
     for p in picks:
         lines.append(f"• {p['name']} — {p['reason']}")
@@ -47,6 +55,7 @@ async def request_feedback(session_id: int, activity_name: str, when: str) -> di
         conn.execute(
             "UPDATE sessions SET feedback_requested = 1 WHERE id = ?", (session_id,)
         )
+    await trace(f"⭐ Feedback requested  session #{session_id} {activity_name} {when}")
     text = (
         f"Detected {activity_name} {when}.\n"
         "Rate it 1–5 (just reply, e.g. `4 great pace #content`)."
@@ -87,6 +96,7 @@ async def _handle_callback(cq: dict) -> None:
     if ":" not in data:
         return
     action, plan_id = data.split(":", 1)
+    await trace(f"📲 Callback  {action} plan #{plan_id}")
     status = {"approve": "approved", "skip": "rejected", "reroll": "rejected"}.get(action)
     if status:
         with get_conn() as conn:
@@ -137,6 +147,7 @@ async def _handle_text(text: str) -> None:
     star_str = "⭐" * stars
     emotion_str = f" #{emotion}" if emotion else ""
     note_str = f' — "{note}"' if note else ""
+    await trace(f"⭐ Feedback logged  {act_name} {star_str}{emotion_str} → pref {new_pref}%")
     await send_message(
         f"{star_str} {act_name} logged{note_str}{emotion_str}.\n"
         f"Preference updated to {new_pref}%."

@@ -86,6 +86,11 @@ async def gps(request: Request):
         _insert_ping(lat, lon, ts, props, weather, geo)
         stored += 1
 
+    if stored > 0:
+        first_coords = locations[0].get("geometry", {}).get("coordinates", [None, None])
+        _flon, _flat = first_coords[0], first_coords[-1]
+        if _flat is not None:
+            await telegram.trace(f"🛰️ GPS  {stored} ping(s)  ({_flat:.5f}, {_flon:.5f})")
     await _process_tail()
     if settings.debug_gps and stored > 0:
         with get_conn() as _c:
@@ -189,9 +194,12 @@ async def _process_tail() -> None:
     if len(pings) < 2:
         return
 
+    await telegram.trace(f"🔍 Tail  {len(pings)} unassigned pings → staypoint scan")
     res = segment_staypoints(
         pings, settings.staypoint_radius_m, settings.staypoint_min_dwell_s
     )
+    if res.closed:
+        await telegram.trace(f"📍 {len(res.closed)} staypoint(s) closed, {len(res.open_tail)} pings still open")
     for sp in res.closed:
         await _materialize_session(sp)
 
@@ -211,10 +219,29 @@ async def _materialize_session(sp) -> None:
             near.append((d, v))
     near.sort(key=lambda t: t[0])
 
+    dwell_min = int(sp.dwell_s / 60)
+    await telegram.trace(
+        f"📍 Staypoint  {dwell_min}min dwell, {len(sp.point_ids)} pings"
+        f" @ ({sp.centroid_lat:.4f}, {sp.centroid_lon:.4f})"
+    )
+
     # anchor suppression: home dwell is not an activity
     if near and near[0][1]["is_anchor"]:
+        await telegram.trace(
+            f"🏠 Anchor suppressed  '{near[0][1]['name']}'  {dwell_min}min dwell"
+        )
         _assign_pings(sp.point_ids, session_id=None, mark_done=True)
         return
+
+    if near:
+        best_d, best_v = near[0]
+        await telegram.trace(
+            f"🎯 Venue  '{best_v['name']}' ({best_v['activity_name']}) @ {int(best_d)}m"
+        )
+    else:
+        await telegram.trace(
+            f"❓ No venue within {int(settings.staypoint_radius_m)}m — classifying by position"
+        )
 
     candidate_venues = [
         {**v, "distance_m": round(d, 1)} for d, v in near
@@ -254,11 +281,16 @@ async def _materialize_session(sp) -> None:
                 "SELECT name FROM activities WHERE id = ?", (cls["activity_id"],)
             ).fetchone()
 
+    act_label = act["name"] if act else "unknown"
+    conf_pct = int((cls.get("confidence") or 0) * 100)
+    when = (
+        f"{datetime.fromtimestamp(sp.start_ts).strftime('%H:%M')}–"
+        f"{datetime.fromtimestamp(sp.end_ts).strftime('%H:%M')}"
+    )
+    await telegram.trace(
+        f"✅ Session #{session_id}  {act_label}  {when}  conf={conf_pct}%"
+    )
     if act:
-        when = (
-            f"{datetime.fromtimestamp(sp.start_ts).strftime('%H:%M')}–"
-            f"{datetime.fromtimestamp(sp.end_ts).strftime('%H:%M')}"
-        )
         await telegram.request_feedback(session_id, act["name"], when)
 
 
