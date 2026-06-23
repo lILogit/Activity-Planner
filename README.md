@@ -41,37 +41,60 @@ app/
   jobs.py       APScheduler wiring for loops A & C + Kairos-window scan
 ```
 
-## Run
+## Environments
+
+The same single FastAPI app runs in two environments. The app code is identical;
+only the runtime and how the three client surfaces are reached differ. The web
+page, GPS module, and Telegram are all available in **both**.
+
+| Surface | Development (local) | Production (Hostinger) |
+|---|---|---|
+| **Run** | bare-metal `uvicorn ... --reload` on `:8000` | `docker compose up -d --build` (Traefik + app) |
+| **Web** | `http://localhost:8000/dashboard` | `https://${DOMAIN_NAME}/dashboard` |
+| **GPS** (Overland) | `https://<ngrok>.ngrok-free.app/gps` | `https://${DOMAIN_NAME}/gps` |
+| **Telegram** | `PUBLIC_BASE_URL=https://<ngrok>.ngrok-free.app` | `PUBLIC_BASE_URL=https://${DOMAIN_NAME}` |
+
+## Development (local)
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # fill in keys; works with none for local testing
+cp .env.example .env          # fill keys; runs keyless for local testing
 uvicorn app.main:app --reload --port 8000
 ```
 
-Point Overland at `http://<host>:8000/gps`. Set `PUBLIC_BASE_URL` so the
-Telegram webhook auto-registers on startup, or register `/tg` manually.
-
-## Deploy (Hostinger VPS)
-
-Docker Compose runs a single app container. The app listens on `127.0.0.1:8000`
-(loopback only), so run your own TLS reverse proxy on the host (nginx, Hostinger's
-panel proxy, etc.) forwarding `https://<DOMAIN>` → `http://127.0.0.1:8000`:
+The web dashboard is at `http://localhost:8000/dashboard`. Telegram and the
+phone's Overland GPS pings need a **public HTTPS** URL, which a local machine
+doesn't have — expose it with ngrok in a second terminal:
 
 ```bash
-cp .env.example .env          # set PUBLIC_BASE_URL (your proxy's https URL) + keys
-docker compose up -d --build
+ngrok http --domain=<your-ngrok-domain> 8000
+# then set in .env:  PUBLIC_BASE_URL=https://<your-ngrok-domain>
+# and restart uvicorn so it re-registers the Telegram webhook
+```
+
+Point Overland at `https://<your-ngrok-domain>/gps`.
+
+## Production (Hostinger VPS)
+
+Docker Compose runs **Traefik + app** in one stack. Traefik owns ports 80/443,
+auto-provisions a Let's Encrypt cert for `${DOMAIN_NAME}`, and routes
+`Host(${DOMAIN_NAME})` to the app over the internal Docker network.
+
+```bash
+cp .env.example .env          # set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL (literal https://<DOMAIN_NAME>) + keys
+docker compose up -d --build  # Traefik gets its cert; app boots; Telegram webhook registers on startup
+docker compose logs -f traefik   # watch ACME/cert issuance
 ```
 
 - On boot, the app registers its Telegram webhook at `PUBLIC_BASE_URL/tg`
   (requires `TELEGRAM_BOT_TOKEN` + `PUBLIC_BASE_URL`).
+- Point Overland at `https://${DOMAIN_NAME}/gps`.
+- The app's own `127.0.0.1:8000` publish is loopback-only — for `curl` debugging
+  on the VPS; Traefik is the public entrypoint, not that port.
 - The SQLite DB lives in the `data` volume (`/data/kairos.db`) and survives
   recreations. Back up with:
   `docker run --rm -v activity-planner_data:/d alpine cat /d/kairos.db > kairos.db.bak`
-
-Bare-metal alternative: `uvicorn app.main:app --host 0.0.0.0 --port 8000` as a
-systemd unit, behind the same TLS proxy.
 
 ## Notes / next
 

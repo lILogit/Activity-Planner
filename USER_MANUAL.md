@@ -25,10 +25,13 @@ The system never pushes unwanted activities — it proposes, you decide.
 
 Install **Overland** on your phone (iOS / Android, free).
 
-Open Settings → Trip URL and set:
+Open Settings → Trip URL and set the server's GPS URL:
 ```
 https://<your-server>/gps
 ```
+Which server? It depends on your environment:
+- **Development:** `https://<your-ngrok-domain>/gps` — ngrok exposes your local app to the phone.
+- **Production:** `https://<DOMAIN_NAME>/gps` — the Hostinger URL (e.g. `https://srv1169048.hstgr.cloud/gps`).
 
 Set frequency to **every 30 seconds** while moving. The app batches pings and sends them when you have network. No action needed after that — just carry your phone.
 
@@ -40,7 +43,9 @@ Find **@PlanovaciBot** in Telegram and send `/start` once (to open the chat). Th
 
 Open in any browser:
 ```
-http://localhost:8000/dashboard
+http://localhost:8000/dashboard        # Development
+https://<DOMAIN_NAME>/dashboard       # Production (e.g. https://srv1169048.hstgr.cloud/dashboard)
+```
 ```
 (or replace `localhost:8000` with your server URL)
 

@@ -136,6 +136,29 @@ Traefik pattern from another deployment on the same Hostinger account. If you
 add another container-based service later, give it its own `Host()` rule and
 join the same `traefik` service rather than standing up a second proxy.
 
+### Environments: Development vs Production
+
+The same single FastAPI app runs in two environments — the app code is identical;
+only the runtime and how the three client surfaces are reached differ. The web
+page, GPS module, and Telegram are all available in **both**.
+
+| Surface | Development (local bare-metal) | Production (Hostinger, Traefik) |
+|---|---|---|
+| **Run** | `uvicorn app.main:app --reload` on `:8000` | `docker compose up -d --build` (traefik + app) |
+| **Web** (`/dashboard`, `/tables`) | `http://localhost:8000/dashboard` | `https://${DOMAIN_NAME}/dashboard` |
+| **GPS** (Overland `POST /gps`) | `https://<ngrok>.ngrok-free.app/gps` | `https://${DOMAIN_NAME}/gps` |
+| **Telegram** webhook (`/tg`) | `PUBLIC_BASE_URL=https://<ngrok>.ngrok-free.app` | `PUBLIC_BASE_URL=https://${DOMAIN_NAME}` |
+
+**Development** has no public TLS of its own, so **ngrok** provides the public
+HTTPS that both the Telegram webhook and the phone's Overland pings require: run
+`ngrok http --domain=<your-ngrok-domain> 8000` in a second terminal, set
+`PUBLIC_BASE_URL` to that ngrok URL, and restart uvicorn so it re-registers the
+webhook. The web dashboard stays on plain `http://localhost:8000`.
+
+**Production** is the Traefik stack above: Traefik owns 80/443, obtains the Let's
+Encrypt cert for `${DOMAIN_NAME}`, and routes `Host(${DOMAIN_NAME})` to the app.
+`DOMAIN_NAME` / `SSL_EMAIL` are compose-only vars — Development doesn't use them.
+
 ---
 
 ## Data model (SQLite)
