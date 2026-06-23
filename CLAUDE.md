@@ -219,18 +219,26 @@ Routing: `NOW` (fit ≥ 0.6, unblocked) · `NEXT` (fit 0.2–0.6) · `PARK`
 ## Commands
 
 ```bash
-# Setup
+# ── One-time setup ──────────────────────────────────────────────────────────
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env.test     # dev env (gitignored); fill keys to enable features
 cp .env.example .env.prod     # prod env (gitignored); set DOMAIN_NAME/SSL_EMAIL/keys
 
-# Dev server (auto-reload). KAIROS_ENV_FILE selects .env.test (config.py reads it):
+# ── Test environment (local dev) ─────────────────────────────────────────────
+# Terminal 1 — app server (auto-reload on file changes):
 KAIROS_ENV_FILE=.env.test .venv/bin/uvicorn app.main:app --reload --port 8000
 
-# Expose locally via ngrok (required for Telegram webhook)
-ngrok http --domain=<your-domain> 8000
+# Terminal 2 — ngrok tunnel (REQUIRED for both Overland GPS and Telegram webhook;
+# without it the phone can't reach /gps and Telegram can't reach /tg):
+ngrok http --domain=<your-ngrok-domain> 8000
+# PUBLIC_BASE_URL in .env.test must match the ngrok domain (e.g. https://<your-ngrok-domain>).
+# Restart uvicorn after changing PUBLIC_BASE_URL so it re-registers the Telegram webhook.
 
+# Dashboard: http://localhost:8000/dashboard  (no ngrok needed for browser access)
+# GPS / Telegram: https://<your-ngrok-domain>/gps  (phone → ngrok → localhost:8000)
+
+# ── Useful dev commands ──────────────────────────────────────────────────────
 # Smoke test (no keys, no network) — fit/block/posterior/staypoint-segmentation asserts
 .venv/bin/python3 tests/smoke.py
 
@@ -241,7 +249,7 @@ ngrok http --domain=<your-domain> 8000
 # Trigger a plan immediately (bypasses 06:30 scheduler)
 .venv/bin/python3 -c "import asyncio; from app.planner import build_and_send_plan; asyncio.run(build_and_send_plan('daily'))"
 
-# Test GPS ingest
+# Test GPS ingest locally (bypasses ngrok)
 curl -s -X POST http://localhost:8000/gps \
   -H "Content-Type: application/json" \
   -d '{"locations":[{"geometry":{"coordinates":[14.42,50.08]},"properties":{"timestamp":"2024-06-01T10:00:00Z","altitude":280}}]}'
@@ -251,8 +259,8 @@ curl -s -X POST http://localhost:8000/api/enrich \
   -H "Content-Type: application/json" \
   -d '{"text": "Golf tournament in Hluboká nad Vltavou on 19.6.2026"}'
 
-# Deploy (Hostinger VPS) — Traefik (TLS + routing) + app, one compose stack
-# Edit .env.prod: set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL (literal https://<DOMAIN_NAME>) + keys
+# ── Production environment (Hostinger VPS, Docker + Traefik) ─────────────────
+# Edit .env.prod first: set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL=https://<DOMAIN_NAME>, + keys
 docker compose up -d --build  # compose injects .env.prod; traefik gets its cert; app boots; Telegram webhook registers on startup
 docker compose logs -f traefik   # watch ACME/cert issuance
 docker compose logs -f app
