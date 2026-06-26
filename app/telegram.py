@@ -41,7 +41,7 @@ async def send_plan(plan_id: int, summary: str, picks: list[dict]) -> dict:
     await trace(f"📋 Plan #{plan_id}  {' · '.join(p['name'] + ' ' + p['route'] for p in picks)}")
     lines = [summary, ""]
     for p in picks:
-        lines.append(f"• {p['name']} — {p['reason']}")
+        lines.append(f"• {p['name']} ({p['route']}) — {p['reason']}")
     keyboard = [[
         {"text": "✅ Approve", "callback_data": f"approve:{plan_id}"},
         {"text": "🔄 Reroll", "callback_data": f"reroll:{plan_id}"},
@@ -61,6 +61,105 @@ async def request_feedback(session_id: int, activity_name: str, when: str) -> di
         "Rate it 1–5 (just reply, e.g. `4 great pace #content`)."
     )
     return await send_message(text)
+
+
+# ---------- unknown staypoint venue tagging ----------
+
+_pending_venue: dict | None = None  # last unknown staypoint waiting for /venue reply
+
+
+async def request_unknown_venue(session_id: int, lat: float, lon: float, dwell_min: int) -> None:
+    global _pending_venue
+    _pending_venue = {"session_id": session_id, "lat": lat, "lon": lon}
+    await trace(f"❓ Unknown session #{session_id} — asking user to identify venue")
+    await send_message(
+        f"📍 New staypoint: {dwell_min}min at ({lat:.4f}, {lon:.4f}) — no matching venue.\n"
+        "Reply `/venue <name>, <activity>` to tag it.\n"
+        "Example: `/venue Riegrovy sady, cycling`"
+    )
+
+
+async def _handle_enrich(text: str) -> None:
+    """Handle /enrich <free text> Telegram command (Loop C via bot)."""
+    from .llm import extract_events
+    with get_conn() as conn:
+        known = [r["name"] for r in conn.execute("SELECT name FROM activities").fetchall()]
+    proposals = extract_events(text, known)
+    if not proposals:
+        await send_message("No events extracted — check ANTHROPIC_API_KEY or rephrase the text.")
+        return
+
+    import httpx as _httpx
+    lines = []
+    for p in proposals:
+        venue_name = (p.get("venue_name") or "").strip()
+        activity_name = (p.get("activity") or "").strip().lower()
+        cluster = p.get("cluster", "SPORT")
+        geocode_q = p.get("geocode_query", venue_name)
+        lat = lon = None
+        if settings.locationiq_api_key and geocode_q:
+            try:
+                async with _httpx.AsyncClient(timeout=10) as cli:
+                    r = await cli.get(
+                        "https://us1.locationiq.com/v1/search",
+                        params={"key": settings.locationiq_api_key, "q": geocode_q, "format": "json", "limit": 1},
+                    )
+                    r.raise_for_status()
+                    hits = r.json()
+                    if hits:
+                        lat, lon = float(hits[0]["lat"]), float(hits[0]["lon"])
+            except Exception:
+                pass
+        if not activity_name:
+            continue
+        with get_conn() as conn:
+            conn.execute("INSERT OR IGNORE INTO activities (name, cluster) VALUES (?,?)", (activity_name, cluster))
+            act_id = conn.execute("SELECT id FROM activities WHERE name=?", (activity_name,)).fetchone()["id"]
+            if venue_name and lat is not None:
+                conn.execute(
+                    "INSERT OR IGNORE INTO venues (name, lat, lon, radius_m, activity_id) VALUES (?,?,?,?,?)",
+                    (venue_name, lat, lon, 300, act_id),
+                )
+            if p.get("event_date"):
+                goal_name = f"{activity_name}-{p['event_date']}"
+                conn.execute(
+                    "INSERT OR IGNORE INTO goals (name, activity_id, metric, target, cadence_days) VALUES (?,?,?,?,?)",
+                    (goal_name, act_id, "sessions", 1, 1),
+                )
+        geocoded = "✅" if lat is not None else "⚠️ no coords"
+        lines.append(f"{geocoded}  {activity_name} @ {venue_name or '(no venue)'}")
+
+    await send_message("Enriched:\n" + "\n".join(lines))
+
+
+async def _handle_venue(text: str) -> None:
+    """Handle /venue <name>, <activity> reply to tag an unknown staypoint."""
+    global _pending_venue
+    if not _pending_venue:
+        await send_message("No pending staypoint to tag right now.")
+        return
+    parts = [p.strip() for p in text.split(",", 1)]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        await send_message("Format: `/venue <venue name>, <activity>`\nExample: `/venue Riegrovy sady, cycling`")
+        return
+    venue_name, activity_name = parts[0], parts[1].lower()
+    lat, lon = _pending_venue["lat"], _pending_venue["lon"]
+    session_id = _pending_venue["session_id"]
+    with get_conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO activities (name, cluster) VALUES (?,?)", (activity_name, "SPORT"))
+        act_id = conn.execute("SELECT id FROM activities WHERE name=?", (activity_name,)).fetchone()["id"]
+        conn.execute(
+            "INSERT OR IGNORE INTO venues (name, lat, lon, radius_m, activity_id) VALUES (?,?,?,?,?)",
+            (venue_name, lat, lon, 200, act_id),
+        )
+        venue_id = conn.execute("SELECT id FROM venues WHERE name=?", (venue_name,)).fetchone()["id"]
+        conn.execute(
+            "UPDATE sessions SET venue_id=?, activity_id=? WHERE id=?",
+            (venue_id, act_id, session_id),
+        )
+    _pending_venue = None
+    await trace(f"📍 Session #{session_id} tagged → {activity_name} @ {venue_name}")
+    await request_feedback(session_id, activity_name, "earlier today")
 
 
 # ---------- inbound webhook handling ----------
@@ -116,9 +215,16 @@ async def _handle_callback(cq: dict) -> None:
 
 
 async def _handle_text(text: str) -> None:
-    stars, note, emotion = parse_feedback(text)
+    t = text.strip()
+    if t.lower().startswith("/enrich "):
+        await _handle_enrich(t[8:].strip())
+        return
+    if t.lower().startswith("/venue "):
+        await _handle_venue(t[7:].strip())
+        return
+    stars, note, emotion = parse_feedback(t)
     if stars is None:
-        await send_message("Send a rating 1–5 to log feedback, or wait for the next plan.")
+        await send_message("Send a rating 1–5 to log feedback, or use /enrich <text> to add an activity.")
         return
     with get_conn() as conn:
         row = conn.execute(

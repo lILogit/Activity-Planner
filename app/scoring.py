@@ -4,7 +4,7 @@ U(a|c,t) = w_pref·Pref + w_fit·Fit + w_prog·Prog + w_expl·Explore, scaled by
 rule activation, with BLOCK rules excluding a candidate outright.
 """
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import log, sqrt
 
 from .config import settings
@@ -121,6 +121,28 @@ class Scored:
     blocked: bool
     route: str
     reason: str
+    causal_chain: list = field(default_factory=list)  # fired rules + fit gates as JSON-serialisable list
+
+
+def _build_causal_chain(activity_id: int, rules: list[dict], c: Conditions, activity: dict) -> list:
+    """Return the list of causal factors (rules that fired + fit gates) for this activity."""
+    active = active_condition_values(c)
+    chain = []
+    for r in rules:
+        if r["activity_id"] != activity_id:
+            continue
+        if (r["cond_type"], r["cond_value"]) in active:
+            chain.append({"cond": f"{r['cond_type']}={r['cond_value']}", "effect": r["kind"], "w": r["weight"]})
+    # Fit gate penalties (only record when they actually penalise)
+    if activity["daylight_required"] and not c.daytime:
+        chain.append({"cond": "daytime=dark", "effect": "fit_penalty", "w": 0.05})
+    if c.season not in activity["season_mask"].split(","):
+        chain.append({"cond": f"season={c.season}", "effect": "fit_penalty", "w": 0.15})
+    if c.temp is not None and activity["t_min"] is not None and activity["t_max"] is not None:
+        if not (activity["t_min"] <= c.temp <= activity["t_max"]):
+            d = min(abs(c.temp - activity["t_min"]), abs(c.temp - activity["t_max"]))
+            chain.append({"cond": f"temp={c.temp:.0f}C", "effect": "fit_penalty", "w": round(max(0.1, 1.0 - d / 15.0), 2)})
+    return chain
 
 
 def utility(
@@ -144,6 +166,7 @@ def utility(
     if blocked:
         u = 0.0
 
+    chain = _build_causal_chain(activity["id"], rules, c, activity)
     route = _route(activity, blocked, f, pref, n_a)
     reason = _reason(activity["name"], blocked, f, pref, goal_gap, expl, factor)
     return Scored(
@@ -158,6 +181,7 @@ def utility(
         blocked=blocked,
         route=route,
         reason=reason,
+        causal_chain=chain,
     )
 
 

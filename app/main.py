@@ -292,6 +292,9 @@ async def _materialize_session(sp) -> None:
     )
     if act:
         await telegram.request_feedback(session_id, act["name"], when)
+    elif not near:
+        # No venue matched — ask user to identify this new location
+        await telegram.request_unknown_venue(session_id, sp.centroid_lat, sp.centroid_lon, dwell_min)
 
 
 def _assign_pings(point_ids, session_id, mark_done=False) -> None:
@@ -421,6 +424,7 @@ async def api_state():
                 "active": a["active"], "utility": sc.utility,
                 "fit": sc.fit, "explore": sc.explore,
                 "route": sc.route, "blocked": sc.blocked, "reason": sc.reason,
+                "causal_chain": sc.causal_chain,
             })
         activities.sort(key=lambda x: x["utility"], reverse=True)
 

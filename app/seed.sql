@@ -22,6 +22,8 @@ INSERT OR IGNORE INTO rules (cond_type, cond_value, activity_id, kind, weight)
 SELECT 'weather','Clear', id, 'activate', 1.3 FROM activities WHERE name = 'golf';
 INSERT OR IGNORE INTO rules (cond_type, cond_value, activity_id, kind, weight)
 SELECT 'temp','cold', id, 'modulate', 1.5 FROM activities WHERE name = 'cold-water swimming';
+INSERT OR IGNORE INTO rules (cond_type, cond_value, activity_id, kind, weight)
+SELECT 'season','summer', id, 'block', 1.0 FROM activities WHERE name = 'cold-water swimming';
 
 -- Home anchor (Zbraslav). Excluded from activity matching.
 INSERT OR IGNORE INTO venues (name, lat, lon, radius_m, is_anchor)

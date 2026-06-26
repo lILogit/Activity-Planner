@@ -101,7 +101,7 @@ def build_plan(horizon: str = "daily", k: int = 1) -> dict:
 
 
 async def build_and_send_plan(horizon: str = "daily") -> dict:
-    k = 3 if horizon == "weekly" else 1
+    k = 3
     plan = build_plan(horizon=horizon, k=k)
     await telegram.send_plan(plan["plan_id"], plan["summary"], plan["picks"])
     return plan
