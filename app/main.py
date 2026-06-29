@@ -17,8 +17,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
@@ -346,6 +346,40 @@ async def admin():
         for a in acts:
             a["pref"] = round(a["alpha"] / (a["alpha"] + a["beta"]), 3)
     return {"pings": pings, "sessions": sessions, "activities": acts}
+
+
+# ------------------------------ DB export / import ------------------------------
+
+@app.get("/api/db/export")
+async def db_export():
+    db = Path(settings.db_path)
+    if not db.exists():
+        raise HTTPException(404, "Database file not found")
+    return FileResponse(path=str(db), media_type="application/octet-stream", filename="kairos.db")
+
+
+@app.post("/api/db/import")
+async def db_import(file: UploadFile = File(...)):
+    db_path = Path(settings.db_path)
+    tmp_path = db_path.with_suffix(".import_tmp")
+    content = await file.read()
+    try:
+        tmp_path.write_bytes(content)
+        try:
+            chk = sqlite3.connect(str(tmp_path))
+            result = chk.execute("PRAGMA integrity_check").fetchone()[0]
+            chk.close()
+        except Exception as e:
+            raise HTTPException(400, f"Invalid SQLite file: {e}")
+        if result != "ok":
+            raise HTTPException(400, f"Integrity check failed: {result}")
+        tmp_path.replace(db_path)
+    except HTTPException:
+        raise
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+    return {"status": "ok", "bytes": len(content)}
 
 
 # ------------------------------ dashboard ------------------------------

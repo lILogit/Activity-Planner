@@ -111,6 +111,7 @@ function render(d) {
   main.innerHTML = `
     ${renderImport()}
     ${renderEnrich()}
+    ${renderDb()}
     ${renderConditions(c)}
     ${renderPlan(plan)}
     ${renderActivities(d.activities)}
@@ -364,6 +365,50 @@ async function runImport() {
     res.innerHTML = `<span class="enrich-err">${esc(String(e))}</span>`;
   } finally {
     btn.disabled = false;
+  }
+}
+
+function renderDb() {
+  return `<section class="full">
+    <h2>Database — export / import</h2>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <a id="db-export-btn" href="/api/db/export" download="kairos.db"
+         style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;text-decoration:none">
+        Download kairos.db
+      </a>
+      <label style="background:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600">
+        Import .db file
+        <input type="file" accept=".db,application/octet-stream" style="display:none" onchange="uploadDb(this)">
+      </label>
+      <span id="db-result" class="muted" style="font-size:12px"></span>
+    </div>
+  </section>`;
+}
+
+async function uploadDb(input) {
+  const res = document.getElementById('db-result');
+  const file = input.files[0];
+  if (!file) return;
+  if (!confirm(`Replace the entire database with "${file.name}"? This cannot be undone.`)) {
+    input.value = '';
+    return;
+  }
+  res.textContent = 'Uploading…';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/api/db/import', {method: 'POST', body: fd});
+    const d = await r.json();
+    if (!r.ok) {
+      res.innerHTML = `<span class="enrich-err">${esc(d.detail || d.error || 'Error')}</span>`;
+    } else {
+      res.innerHTML = `<span class="enrich-ok">Imported ${(d.bytes/1024).toFixed(1)} KB — reloading…</span>`;
+      setTimeout(() => location.reload(), 1200);
+    }
+  } catch(e) {
+    res.innerHTML = `<span class="enrich-err">${esc(String(e))}</span>`;
+  } finally {
+    input.value = '';
   }
 }
 

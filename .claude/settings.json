@@ -11,7 +11,7 @@
       "Bash(curl -s \"https://pauline-rudimentary-jimmy.ngrok-free.dev/health\")",
       "Bash(curl -s http://localhost:8000/api/state)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/dashboard)",
-      "Bash(curl -s -X POST http://localhost:8000/api/enrich -H \"Content-Type: application/json\" -d '{\"\"text\"\": \"\"Golf tournament in Hlubok\u00e1 nad Vltavou on 19.6.2026\"\"}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/enrich -H \"Content-Type: application/json\" -d '{\"\"text\"\": \"\"Golf tournament in Hluboká nad Vltavou on 19.6.2026\"\"}')",
       "Bash(.venv/bin/python3 -c \":*)",
       "Read(//Users/jirikouba/Documents/**)",
       "Bash(curl -s -X POST http://localhost:8000/api/import/gps-csv)",
@@ -77,11 +77,20 @@
       "Bash(curl -fsS http://localhost:8012/health)",
       "Bash(break)",
       "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:8012/dashboard)",
-      "Bash(echo \" /dashboard=$\\(curl -s -o /dev/null -w '%{http_code}' http://localhost:8012/dashboard\\) \\(expect 200 \u2014 open, no redirect\\)\")",
+      "Bash(echo \" /dashboard=$\\(curl -s -o /dev/null -w '%{http_code}' http://localhost:8012/dashboard\\) \\(expect 200 — open, no redirect\\)\")",
       "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:8012/tables)",
       "Bash(.venv/bin/python tests/smoke.py)",
       "Bash(.venv/bin/python tests/e2e_probe.py)",
-      "Bash(PYTHONPATH=. .venv/bin/python tests/e2e_probe.py)"
+      "Bash(PYTHONPATH=. .venv/bin/python tests/e2e_probe.py)",
+      "Bash(KAIROS_ENV_FILE=.env.test .venv/bin/uvicorn app.main:app --reload --port 8000)",
+      "Bash(echo \"uvicorn PID: $!\")",
+      "Bash(echo \"ngrok PID: $!\")",
+      "Bash(KAIROS_ENV_FILE=.env.test .venv/bin/python tests/smoke.py)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -I http://localhost:8000/api/db/export)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download} bytes, Content-Type: %{content_type}\" http://localhost:8000/api/db/export)",
+      "Bash(curl -s http://localhost:8000/api/db/export -o /tmp/claude-1000/-home-nemo-Documents-Activity-Planner/bcc70246-7f9a-46d6-895f-cf10d6459fc9/scratchpad/kairos_test.db)",
+      "Bash(curl -s -X POST http://localhost:8000/api/db/import -F file=@/tmp/claude-1000/-home-nemo-Documents-Activity-Planner/bcc70246-7f9a-46d6-895f-cf10d6459fc9/scratchpad/kairos_test.db)"
     ]
   }
 }
