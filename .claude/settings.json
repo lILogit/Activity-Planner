@@ -90,7 +90,12 @@
       "Bash(curl -s -I http://localhost:8000/api/db/export)",
       "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download} bytes, Content-Type: %{content_type}\" http://localhost:8000/api/db/export)",
       "Bash(curl -s http://localhost:8000/api/db/export -o /tmp/claude-1000/-home-nemo-Documents-Activity-Planner/bcc70246-7f9a-46d6-895f-cf10d6459fc9/scratchpad/kairos_test.db)",
-      "Bash(curl -s -X POST http://localhost:8000/api/db/import -F file=@/tmp/claude-1000/-home-nemo-Documents-Activity-Planner/bcc70246-7f9a-46d6-895f-cf10d6459fc9/scratchpad/kairos_test.db)"
+      "Bash(curl -s -X POST http://localhost:8000/api/db/import -F file=@/tmp/claude-1000/-home-nemo-Documents-Activity-Planner/bcc70246-7f9a-46d6-895f-cf10d6459fc9/scratchpad/kairos_test.db)",
+      "Bash(pip index *)",
+      "Bash(pip download *)",
+      "Bash(unzip -o -q asciinet-0.3.1-py3-none-any.whl -d extracted)",
+      "Bash(xargs -I{} echo {})",
+      "Bash(java -version)"
     ]
   }
 }
