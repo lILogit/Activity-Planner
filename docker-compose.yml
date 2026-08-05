@@ -1,14 +1,12 @@
 # KAIROS on Hostinger VPS — Traefik terminates TLS (Let's Encrypt) and routes
 services:
   traefik:
-    image: "traefik:v2.10"
+    # v2.10's vendored Docker client hardcodes API 1.24 and ignores
+    # DOCKER_API_VERSION — Hostinger's host Docker Engine rejects anything
+    # below 1.40 ("client version 1.24 is too old"). v3 negotiates properly.
+    image: "traefik:v3.1"
     container_name: kairos-traefik
     restart: unless-stopped
-    environment:
-      # traefik:v2.10's vendored Docker client falls back to API 1.24 when
-      # negotiation fails; Hostinger's host Docker Engine rejects anything
-      # below 1.40 ("client version 1.24 is too old"). Pin it explicitly.
-      DOCKER_API_VERSION: "1.41"
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
@@ -68,12 +66,13 @@ services:
       - traefik.http.routers.kairos.entrypoints=websecure
       - traefik.http.routers.kairos.tls.certresolver=kairosresolver
       - traefik.http.services.kairos.loadbalancer.server.port=8000
-      - traefik.http.middlewares.kairos-headers.headers.SSLRedirect=true
+      # SSLRedirect/SSLHost were removed in Traefik v3 (use entryPoint
+      # redirection instead — already configured above via
+      # entrypoints.web.http.redirections.entryPoint).
       - traefik.http.middlewares.kairos-headers.headers.STSSeconds=315360000
       - traefik.http.middlewares.kairos-headers.headers.browserXSSFilter=true
       - traefik.http.middlewares.kairos-headers.headers.contentTypeNosniff=true
       - traefik.http.middlewares.kairos-headers.headers.forceSTSHeader=true
-      - traefik.http.middlewares.kairos-headers.headers.SSLHost=${DOMAIN_NAME}
       - traefik.http.middlewares.kairos-headers.headers.STSIncludeSubdomains=true
       - traefik.http.middlewares.kairos-headers.headers.STSPreload=true
       - traefik.http.routers.kairos.middlewares=kairos-headers@docker
