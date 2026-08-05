@@ -1,12 +1,6 @@
 # KAIROS on Hostinger VPS — Traefik terminates TLS (Let's Encrypt) and routes
 services:
   traefik:
-    # Deliberately UNPINNED. Pinning to a specific tag (v2.10, then v3.1) broke
-    # the Docker provider against Hostinger's host Docker Engine: "Error
-    # response from daemon: client version 1.24 is too old. Minimum supported
-    # API version is 1.40" — both pinned versions' vendored Docker client sent
-    # a stale hardcoded API version. Rolling `latest` is what's proven to work
-    # here; don't re-pin without confirming the new tag negotiates correctly.
     image: "traefik"
     container_name: kairos-traefik
     restart: unless-stopped
@@ -18,38 +12,19 @@ services:
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.kairosresolver.acme.tlschallenge=true"
-      # Same interpolation caveat as the Host() rule below — set SSL_EMAIL in
-      # Hostinger's environment-variables UI (or a .env in the project dir), not
-      # just .env.prod, or this registers with a blank ACME contact.
       - "--certificatesresolvers.kairosresolver.acme.email=${SSL_EMAIL}"
       - "--certificatesresolvers.kairosresolver.acme.storage=/letsencrypt/acme.json"
-      - "--accesslog=true"
-      - "--accesslog.filepath=/logs/access.log"
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - traefik_data:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik_logs:/logs
 
   app:
-    # Image is built by GitHub Actions and pushed to GHCR (see .github/workflows/).
-    # Hostinger PULLS this image — it does not build from source (its automated
-    # deploy environment lacks the full repo build context).
-    # For local dev: `docker compose up -d --build` builds from the `build:` below.
     build:
       context: .
-    image: ghcr.io/lilogit/activity-planner:latest
-    # Without this, `docker compose up -d` skips pulling once the tag exists
-    # locally, so a redeploy after a new GHCR push silently reuses the old
-    # image. `always` forces a fresh pull every time.
-    # One-time setup: the GHCR package is created private on first push (the
-    # workflow's GITHUB_TOKEN can't flip that) — make it public once at
-    # github.com/lilogit/activity-planner/pkgs/container/activity-planner
-    # (Package settings → Change visibility), or `docker login ghcr.io` on
-    # the VPS with a PAT that has `read:packages`.
-    pull_policy: always
+    image: kairos:latest
     container_name: kairos
     restart: unless-stopped
     env_file:
@@ -64,31 +39,21 @@ services:
       - "127.0.0.1:8000:8000"   # loopback only — for local debugging; Traefik reaches the app via the docker network, not this port
     labels:
       - traefik.enable=true
-      # Fallback default is REQUIRED for the Hostinger deploy: it clones the repo
-      # into a temp dir where .env* is absent (gitignored), and `env_file:` feeds
-      # the container only — NOT ${...} interpolation here. Without the default
-      # this expands to Host(``), which matches nothing, so no cert is ever
-      # requested and Traefik serves its self-signed fallback (ERR_CERT_AUTHORITY_INVALID).
-      - traefik.http.routers.kairos.rule=Host(`${DOMAIN_NAME:-srv1091358.hstgr.cloud}`)
+      - traefik.http.routers.kairos.rule=Host(`${DOMAIN_NAME}`)
       - traefik.http.routers.kairos.tls=true
       - traefik.http.routers.kairos.entrypoints=web,websecure
       - traefik.http.routers.kairos.tls.certresolver=kairosresolver
       - traefik.http.services.kairos.loadbalancer.server.port=8000
-      # SSLRedirect/SSLHost were removed in Traefik v3 (use entryPoint
-      # redirection instead — already configured above via
-      # entrypoints.web.http.redirections.entryPoint). Since `image: traefik`
-      # rolls to latest (currently v3.x), these must stay out or the router's
-      # dynamic config fails to load, the same way the static config failed
-      # earlier on `--accesslog.file.path` (unknown field).
+      - traefik.http.middlewares.kairos-headers.headers.SSLRedirect=true
       - traefik.http.middlewares.kairos-headers.headers.STSSeconds=315360000
       - traefik.http.middlewares.kairos-headers.headers.browserXSSFilter=true
       - traefik.http.middlewares.kairos-headers.headers.contentTypeNosniff=true
       - traefik.http.middlewares.kairos-headers.headers.forceSTSHeader=true
+      - traefik.http.middlewares.kairos-headers.headers.SSLHost=${DOMAIN_NAME}
       - traefik.http.middlewares.kairos-headers.headers.STSIncludeSubdomains=true
       - traefik.http.middlewares.kairos-headers.headers.STSPreload=true
       - traefik.http.routers.kairos.middlewares=kairos-headers@docker
     healthcheck:
-      # curl is NOT in the image (only tzdata) — use Python's urllib instead.
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status==200 else 1)"]
       interval: 30s
       timeout: 5s
@@ -98,4 +63,3 @@ services:
 volumes:
   data:
   traefik_data:
-  traefik_logs:
