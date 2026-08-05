@@ -1,0 +1,38 @@
+# Static routing for the single `app` backend, read by Traefik's file provider.
+# Replaces Docker label-based discovery — Hostinger's host Docker Engine rejects
+# the Docker provider's client (hardcoded API 1.24, no negotiation, in both
+# Traefik v2 and v3) with "client version 1.24 is too old". Since this stack only
+# ever has one backend, static config sidesteps the incompatibility entirely and
+# drops the need to mount /var/run/docker.sock into the traefik container.
+#
+# Go-templated by Traefik's file provider — {{ env "DOMAIN_NAME" }} reads the
+# DOMAIN_NAME env var passed to the traefik service below.
+http:
+  routers:
+    kairos:
+      rule: "Host(`{{ env "DOMAIN_NAME" }}`)"
+      entryPoints:
+        - websecure
+      service: kairos
+      tls:
+        certResolver: kairosresolver
+      middlewares:
+        - kairos-headers
+
+  services:
+    kairos:
+      loadBalancer:
+        servers:
+          # "app" is the compose service name — resolvable via Docker's embedded
+          # DNS on the shared `kairos` network regardless of container_name.
+          - url: "http://app:8000"
+
+  middlewares:
+    kairos-headers:
+      headers:
+        stsSeconds: 315360000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        browserXssFilter: true
+        contentTypeNosniff: true

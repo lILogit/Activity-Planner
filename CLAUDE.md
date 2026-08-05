@@ -80,6 +80,7 @@ Browser ──GET /dashboard──▶ FastAPI ──GET /api/state──▶ live
 | `app/jobs.py` | APScheduler wiring for loops A & C + `kairos_window` scan | schedules |
 | `Dockerfile` | Image for the single uvicorn process (non-root, `/data` volume, `--proxy-headers`) | image / runtime deps |
 | `docker-compose.yml` | `traefik` service (TLS/routing) + `app` service, `data`/`traefik_data` volumes, `/health` healthcheck | Hostinger deploy |
+| `traefik/dynamic.yml` | Static Traefik routing config (file provider) — Host rule, TLS cert resolver, security headers | routing/header changes |
 
 ### Endpoints
 
@@ -108,7 +109,12 @@ hand-edited.
 
 Two containers in one compose stack: a `traefik` service terminates TLS (Let's
 Encrypt via the TLS-ALPN challenge) and routes by `Host()` to the `app` container
-over the internal Docker network, discovered via `traefik.*` labels:
+over the internal Docker network. Routing is **static**, defined in
+`traefik/dynamic.yml` (Traefik's file provider), not Docker label discovery —
+Hostinger's host Docker Engine rejects the Docker provider's client (hardcoded
+API 1.24 in both Traefik v2 and v3, no negotiation) with "client version 1.24
+is too old", so `traefik` never mounts `/var/run/docker.sock`. Since this stack
+has exactly one backend, static config is simpler than dynamic discovery anyway.
 
 ```
 Internet ──443──▶ traefik container  (Let's Encrypt cert, Host(`${DOMAIN_NAME}`) routing)
