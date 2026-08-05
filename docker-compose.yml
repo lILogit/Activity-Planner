@@ -16,7 +16,7 @@ services:
       - "--certificatesresolvers.kairosresolver.acme.email=${SSL_EMAIL}"
       - "--certificatesresolvers.kairosresolver.acme.storage=/letsencrypt/acme.json"
       - "--accesslog=true"
-      - "--accesslog.file.path=/logs/access.log"
+      - "--accesslog.filepath=/logs/access.log"
     ports:
       - "80:80"
       - "443:443"
