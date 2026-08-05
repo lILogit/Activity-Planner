@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KAIROS — Decision Tree</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+    --text: #e2e8f0; --muted: #8892a4; --accent: #6c8ebf;
+    --ok: #4ade80; --err: #f87171; --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; padding: 20px; }
+  header { margin-bottom: 24px; }
+  h1 { font-size: 24px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+  a { color: var(--muted); text-decoration: none; }
+  a:hover { color: var(--accent); }
+
+  .tree-container { display: flex; flex-wrap: wrap; gap: 16px; }
+  .condition-type { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; flex: 1; min-width: 280px; }
+  .condition-type h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--accent); }
+  .cond-value { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .cond-value:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .cond-value-header { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+  .rule { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .kind { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .kind.activate { background: rgba(74, 222, 128, 0.2); color: var(--ok); }
+  .kind.block { background: rgba(248, 113, 113, 0.2); color: var(--err); }
+  .kind.modulate { background: rgba(251, 191, 36, 0.2); color: var(--warn); }
+  .weight { opacity: 0.7; }
+  .activity { font-weight: 600; }
+  .cluster { opacity: 0.6; font-size: 12px; }
+
+  .legend { margin-top: 24px; padding: 16px; background: var(--surface); border-radius: 8px; }
+  .legend h3 { font-size: 14px; margin-bottom: 8px; }
+  .legend-items { display: flex; gap: 16px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KAIROS — Decision Tree</h1>
+  <a href="/dashboard">&larr; Dashboard</a>
+  <span style="margin: 0 16px; color: var(--muted)">|</span>
+  <a href="/tables">Tables</a>
+</header>
+
+<div id="tree" class="tree-container">Loading…</div>
+
+<div class="legend">
+  <h3>Rule kinds</h3>
+  <div class="legend-items">
+    <div class="legend-item"><span class="kind activate">activate</span> boosts activity when condition matches</div>
+    <div class="legend-item"><span class="kind block">block</span> prevents activity (utility → 0)</div>
+    <div class="legend-item"><span class="kind modulate">modulate</span> multiplies utility by weight</div>
+  </div>
+</div>
+
+<script>
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+async function load() {
+  try {
+    const r = await fetch('/api/decision-tree');
+    const d = await r.json();
+    render(d);
+  } catch (e) {
+    document.getElementById('tree').innerHTML = `<p style="color:var(--err)">Error: ${e.message}</p>`;
+  }
+}
+
+function render(data) {
+  if (!data.tree || Object.keys(data.tree).length === 0) {
+    document.getElementById('tree').innerHTML = '<p class="muted">No rules defined yet.</p>';
+    return;
+  }
+
+  const html = Object.entries(data.tree).map(([condType, values]) => {
+    const valueHtml = Object.entries(values).map(([condValue, rules]) => {
+      const rulesHtml = rules.map(r => `
+        <div class="rule">
+          <span class="activity">${esc(r.activity)}</span>
+          <span class="cluster">${esc(r.cluster)}</span>
+          <span class="kind ${r.kind}">${r.kind}</span>
+          ${r.weight !== 1.0 ? `<span class="weight">×${r.weight}</span>` : ''}
+        </div>
+      `).join('');
+      return `
+        <div class="cond-value">
+          <div class="cond-value-header">${esc(condValue)}</div>
+          ${rulesHtml}
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="condition-type">
+        <h2>${esc(condType)}</h2>
+        ${valueHtml}
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('tree').innerHTML = html;
+}
+
+load();
+</script>
+</body>
+</html>

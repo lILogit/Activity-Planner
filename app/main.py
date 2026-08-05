@@ -204,6 +204,22 @@ async def _process_tail() -> None:
         await _materialize_session(sp)
 
 
+async def _auto_create_venue(sp, activity_id: int | None) -> int | None:
+    """Create a venue at the staypoint centroid, with reverse-geocoded address if available."""
+    addr = (await reverse_geocode(sp.centroid_lat, sp.centroid_lon)).get("address")
+    # Use address as name if it's usable, otherwise fall back to coordinate-based name
+    if addr and len(addr) < 60 and not addr.startswith("Error"):
+        name = addr
+    else:
+        name = f"Venue @ {sp.centroid_lat:.4f},{sp.centroid_lon:.4f}"
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO venues (name, lat, lon, radius_m, activity_id, address) VALUES (?,?,?,?,?,?)",
+            (name, sp.centroid_lat, sp.centroid_lon, 200, activity_id, addr),
+        )
+        return cur.lastrowid
+
+
 async def _materialize_session(sp) -> None:
     with get_conn() as conn:
         venues = [dict(r) for r in conn.execute(
@@ -293,8 +309,23 @@ async def _materialize_session(sp) -> None:
     if act:
         await telegram.request_feedback(session_id, act["name"], when)
     elif not near:
-        # No venue matched — ask user to identify this new location
-        await telegram.request_unknown_venue(session_id, sp.centroid_lat, sp.centroid_lon, dwell_min)
+        # No venue matched — auto-create a venue with reverse-geocoded address
+        venue_id = await _auto_create_venue(sp, cls.get("activity_id"))
+        if venue_id:
+            with get_conn() as conn:
+                conn.execute("UPDATE sessions SET venue_id = ? WHERE id = ?", (venue_id, session_id))
+            # Load the auto-created venue name for the nudge
+            with get_conn() as conn:
+                venue = conn.execute("SELECT name FROM venues WHERE id = ?", (venue_id,)).fetchone()
+            await telegram.trace(f"📍 Auto-created venue '{venue['name']}' for this staypoint")
+            # Non-blocking nudge: allow user to rename via /venue reply
+            await telegram.send_message(
+                f"Auto-created venue *{venue['name']}* at this staypoint.\n"
+                f"Reply `/venue NewName, activity` to rename it."
+            )
+            # Mark venue_pending so /venue reply knows which session to tag
+            with get_conn() as conn:
+                conn.execute("UPDATE sessions SET venue_pending = 1 WHERE id = ?", (session_id,))
 
 
 def _assign_pings(point_ids, session_id, mark_done=False) -> None:
@@ -382,7 +413,139 @@ async def db_import(file: UploadFile = File(...)):
     return {"status": "ok", "bytes": len(content)}
 
 
+# ------------------------------ Per-table CSV export/import ------------------
+
+@app.get("/api/{table}/export")
+async def csv_export(table: str):
+    """Export a table as CSV."""
+    spec = _crud_spec(table)
+    with get_conn() as conn:
+        rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+    if not rows:
+        cols = spec["columns"]
+        headers = ",".join(sorted(cols))
+        return Response(content=headers, media_type="text/csv")
+    # Use csv module to properly quote values
+    import csv as _csv
+    from io import StringIO
+    output = StringIO()
+    writer = _csv.writer(output)
+    writer.writerow(rows[0].keys())  # header row
+    for row in rows:
+        writer.writerow(row)
+    return Response(content=output.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{table}.csv"'})
+
+
+@app.post("/api/{table}/import")
+async def csv_import(table: str, file: UploadFile = File(...)):
+    """Import CSV into a table. Constrained to _IMPORTABLE tables (pings, feedback)."""
+    if table not in _IMPORTABLE:
+        raise HTTPException(400, f"CSV import not allowed for '{table}'. Allowed: {sorted(_IMPORTABLE)}")
+    spec = _crud_spec(table)
+    content = await file.read()
+    import csv as _csv
+    from io import StringIO
+    reader = _csv.DictReader(StringIO(content.decode("utf-8")))
+    imported = skipped = 0
+    with get_conn() as conn:
+        for row in reader:
+            # Keep only columns that exist in the spec
+            filtered = {k: v for k, v in row.items() if k in spec["columns"]}
+            # Check required fields
+            missing = spec["required"] - filtered.keys()
+            if missing:
+                skipped += 1
+                continue
+            # Table-specific idempotency/validation
+            if table == "pings":
+                # Idempotent on timestamp
+                ts = filtered.get("ts")
+                if not ts:
+                    skipped += 1
+                    continue
+                existing = conn.execute("SELECT id FROM pings WHERE ts = ?", (ts,)).fetchone()
+                if existing:
+                    skipped += 1
+                    continue
+            elif table == "feedback":
+                # Validate session_id exists
+                session_id = filtered.get("session_id")
+                if session_id:
+                    sess = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+                    if not sess:
+                        skipped += 1
+                        continue
+            # Convert empty strings to None for numeric fields
+            for k, v in filtered.items():
+                if v == "" and k in {"altitude", "wifi", "distance_m", "duration_s", "venue_id", "activity_id", "confidence", "note", "emotion", "temperature", "pressure", "humidity", "wind_speed"}:
+                    filtered[k] = None
+                elif v == "" and k in {"session_id", "stars", "ts"}:
+                    pass  # required fields should have values
+                elif k in {"altitude", "distance_m", "duration_s", "temperature", "pressure", "humidity", "wind_speed", "stars", "ts"} and v is not None:
+                    try:
+                        filtered[k] = float(v)
+                    except ValueError:
+                        filtered[k] = None
+            cols = ", ".join(filtered.keys())
+            placeholders = ", ".join("?" for _ in filtered)
+            try:
+                conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", tuple(filtered.values()))
+                imported += 1
+            except sqlite3.IntegrityError as e:
+                skipped += 1
+    return {"imported": imported, "skipped": skipped}
+
+
 # ------------------------------ dashboard ------------------------------
+
+@app.get("/api/patterns")
+async def api_patterns():
+    """Return detected route patterns."""
+    from .patterns import detect_patterns
+    return detect_patterns()
+
+
+@app.get("/api/decision-tree")
+async def api_decision_tree():
+    """Return the rules as a decision tree structure for visualization.
+
+    The flat rules table (cond_type, cond_value, activity_id, kind, weight) is
+    reshaped into a tree: condition types branch to specific values, which connect
+    to activities with their effects (activate/block/modulate and weight). No schema
+    change — this is purely a query/visualization layer.
+    """
+    with get_conn() as conn:
+        rules = [dict(r) for r in conn.execute(
+            """SELECT r.*, a.name AS activity_name, a.cluster
+               FROM rules r JOIN activities a ON a.id = r.activity_id"""
+        ).fetchall()]
+        activities = [dict(r) for r in conn.execute("SELECT * FROM activities WHERE active = 1").fetchall()]
+
+    # Build tree: condition_type -> cond_value -> list of (activity, kind, weight)
+    tree = {}
+    for rule in rules:
+        cond_type = rule["cond_type"]
+        cond_value = rule["cond_value"]
+        if cond_type not in tree:
+            tree[cond_type] = {}
+        if cond_value not in tree[cond_type]:
+            tree[cond_type][cond_value] = []
+        tree[cond_type][cond_value].append({
+            "activity": rule["activity_name"],
+            "cluster": rule["cluster"],
+            "kind": rule["kind"],
+            "weight": rule["weight"],
+        })
+
+    # Also return the list of all activities (leaf nodes) for context
+    return {
+        "tree": tree,
+        "activities": activities,
+    }
+
+
+@app.get("/api/state")
 
 @app.get("/api/state")
 async def api_state():
@@ -496,6 +659,7 @@ async def api_state():
         "feedback": feedback,
         "venues": venues,
         "goals": goals,
+        "patterns": await api_patterns(),
     }
 
 
@@ -540,6 +704,12 @@ async def dashboard(_: None = Depends(require_login)):
 @app.get("/tables")
 async def tables_page(_: None = Depends(require_login)):
     html = Path(__file__).with_name("tables.html").read_text()
+    return HTMLResponse(html)
+
+
+@app.get("/decision-tree")
+async def decision_tree_page(_: None = Depends(require_login)):
+    html = Path(__file__).with_name("decision_tree.html").read_text()
     return HTMLResponse(html)
 
 
@@ -771,24 +941,70 @@ _CRUD_TABLES = {
             "t_min", "t_max", "season_mask", "typical_duration_min", "active",
         },
         "required": {"name", "cluster"},
+        "mode": "full",
     },
     "venues": {
         "columns": {"name", "lat", "lon", "radius_m", "activity_id", "is_anchor", "address"},
         "required": {"name", "lat", "lon"},
+        "mode": "full",
     },
     "rules": {
         "columns": {"cond_type", "cond_value", "activity_id", "kind", "weight"},
         "required": {"cond_type", "cond_value", "activity_id", "kind"},
+        "mode": "full",
     },
     "goals": {
         "columns": {"name", "activity_id", "metric", "target", "cadence_days", "progress"},
         "required": {"name", "target"},
+        "mode": "full",
+    },
+    "sessions": {
+        "columns": {"start_ts", "end_ts", "duration_s", "centroid_lat", "centroid_lon", "venue_id", "activity_id", "confidence", "feedback_requested"},
+        "required": set(),
+        "mode": "full",
+    },
+    "feedback": {
+        "columns": {"session_id", "stars", "note", "emotion", "ts"},
+        "required": {"session_id", "stars", "ts"},
+        "mode": "full",
+    },
+    "pings": {
+        "columns": {"ts", "lat", "lon", "altitude", "wifi", "address", "weather_main", "weather_desc", "temp", "pressure", "humidity", "wind_speed", "distance_m", "duration_s", "session_id"},
+        "required": {"ts", "lat", "lon"},
+        "mode": "log",
+    },
+    "plans": {
+        "columns": {"date", "horizon", "status", "payload", "created_ts"},
+        "required": {"date", "horizon", "payload", "created_ts"},
+        "mode": "readonly",
     },
 }
 
 _CRUD_ENUMS = {
     "activities": {"cluster": _VALID_CLUSTERS},
     "rules": {"kind": {"activate", "block", "modulate"}},
+}
+
+_IMPORTABLE = {"pings", "feedback"}
+
+# Extended column specs with FK table hints for the UI
+_COLUMN_DETAILS = {
+    "venues": {
+        "activity_id": {"fk_table": "activities"},
+    },
+    "rules": {
+        "activity_id": {"fk_table": "activities"},
+    },
+    "goals": {
+        "activity_id": {"fk_table": "activities"},
+    },
+    "sessions": {
+        "venue_id": {"fk_table": "venues"},
+        "activity_id": {"fk_table": "activities"},
+    },
+    "feedback": {
+        "session_id": {"fk_table": "sessions"},
+    },
 }
 
 
@@ -803,6 +1019,23 @@ def _crud_validate(table: str, fields: dict) -> None:
     for field, allowed in _CRUD_ENUMS.get(table, {}).items():
         if field in fields and fields[field] not in allowed:
             raise HTTPException(400, f"{field} must be one of {sorted(allowed)}")
+
+
+def _apply_delete_cascade(table: str, ids: list[int], conn) -> None:
+    """Apply cascade logic for deleting rows from a table.
+
+    For venues: unlink sessions (null venue_id).
+    For activities: unlink sessions (null activity_id), unlink venues (null activity_id),
+                    cascade-delete rules (rules.activity_id is NOT NULL, cannot be nulled).
+    """
+    if not ids:
+        return
+    if table == "venues":
+        conn.execute(f"UPDATE sessions SET venue_id = NULL WHERE venue_id IN ({','.join('?'*len(ids))})", ids)
+    elif table == "activities":
+        conn.execute(f"UPDATE sessions SET activity_id = NULL WHERE activity_id IN ({','.join('?'*len(ids))})", ids)
+        conn.execute(f"UPDATE venues SET activity_id = NULL WHERE activity_id IN ({','.join('?'*len(ids))})", ids)
+        conn.execute(f"DELETE FROM rules WHERE activity_id IN ({','.join('?'*len(ids))})", ids)
 
 
 @app.get("/api/{table}")
@@ -885,16 +1118,7 @@ async def crud_delete(table: str, row_id: int):
     _crud_spec(table)
     try:
         with get_conn() as conn:
-            # Sessions are a historical log, not config — unlink rather than
-            # block deletion of the venue/activity they once pointed to.
-            if table == "venues":
-                conn.execute("UPDATE sessions SET venue_id = NULL WHERE venue_id = ?", (row_id,))
-            elif table == "activities":
-                conn.execute("UPDATE sessions SET activity_id = NULL WHERE activity_id = ?", (row_id,))
-                conn.execute("UPDATE venues SET activity_id = NULL WHERE activity_id = ?", (row_id,))
-                # rules.activity_id is NOT NULL — a rule without its activity
-                # is meaningless, so cascade rather than block or null it.
-                conn.execute("DELETE FROM rules WHERE activity_id = ?", (row_id,))
+            _apply_delete_cascade(table, [row_id], conn)
             cur = conn.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
     except sqlite3.IntegrityError as e:
         raise HTTPException(400, str(e))
@@ -903,194 +1127,44 @@ async def crud_delete(table: str, row_id: int):
     return {"deleted": row_id}
 
 
+@app.post("/api/{table}/bulk")
+async def crud_bulk(table: str, request: Request):
+    """Bulk delete or update rows in a table."""
+    spec = _crud_spec(table)
+    body = await request.json()
+    action = body.get("action")
+    ids = body.get("ids", [])
+    fields = body.get("fields", {})
+
+    if action not in ("delete", "update"):
+        raise HTTPException(400, "action must be 'delete' or 'update'")
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        raise HTTPException(400, "ids must be a list of integers")
+    if not ids:
+        return {"deleted": 0} if action == "delete" else {"updated": 0}
+
+    try:
+        with get_conn() as conn:
+            if action == "delete":
+                _apply_delete_cascade(table, ids, conn)
+                cur = conn.execute(f"DELETE FROM {table} WHERE id IN ({','.join('?'*len(ids))})", ids)
+                return {"deleted": cur.rowcount}
+            else:  # update
+                # Validate and filter fields against the spec
+                allowed_fields = {k: v for k, v in fields.items() if k in spec["columns"]}
+                if not allowed_fields:
+                    raise HTTPException(400, f"no valid fields; allowed: {sorted(spec['columns'])}")
+                _crud_validate(table, allowed_fields)
+                set_clause = ", ".join(f"{k} = ?" for k in allowed_fields)
+                cur = conn.execute(
+                    f"UPDATE {table} SET {set_clause} WHERE id IN ({','.join('?'*len(ids))})",
+                    list(allowed_fields.values()) + ids
+                )
+                return {"updated": cur.rowcount}
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(400, str(e))
+
+
 # ------------------------------ GPS CSV import ------------------------------
 
 # Category → (activity_name, cluster)
-_CATEGORY_MAP = {
-    "swimming":      ("cold-water swimming", "SPORT"),
-    "entertainment": ("entertainment",       "CULTURE"),
-    "coffee shop":   ("cafe",                "CULTURE"),
-    "shopping":      ("shopping",            "SOCIAL"),
-    "sport":         ("sport",               "SPORT"),
-    "culture":       ("culture",             "CULTURE"),
-    "restaurant":    ("dining",              "SOCIAL"),
-}
-_SKIP_ACTIONS    = {"home", "road", ""}
-_SKIP_CATEGORIES = {"transport", ""}
-
-
-@app.post("/api/import/gps-csv")
-async def import_gps_csv():
-    """Import GPS records.csv from the project root.
-
-    Idempotent: rows whose createdAt timestamp already exists in pings are skipped.
-    Rows with Stars > 0 and non-transport/non-home category also create a session + feedback.
-    Stars are on a 0-10 scale in the CSV; we normalise to 1-5.
-    """
-    import csv as _csv
-    from .scoring import update_posterior
-
-    csv_path = Path(__file__).parent.parent / "GPS records.csv"
-    if not csv_path.exists():
-        return {"error": f"File not found: {csv_path}"}
-
-    # Collect already-imported timestamps to make the endpoint idempotent
-    with get_conn() as conn:
-        existing_ts = {
-            r[0] for r in conn.execute("SELECT ts FROM pings").fetchall()
-        }
-
-    pings_imported = sessions_created = feedback_created = skipped = 0
-
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = _csv.DictReader(f)
-        for row in reader:
-            # Parse timestamp from createdAt
-            created_raw = row.get("createdAt", "").strip()
-            if not created_raw:
-                skipped += 1
-                continue
-            try:
-                ts = int(datetime.fromisoformat(
-                    created_raw.replace("Z", "+00:00")
-                ).timestamp())
-            except Exception:
-                skipped += 1
-                continue
-
-            # Parse coordinates
-            try:
-                lat = float(row["lat"]) if row.get("lat") else None
-                lon = float(row["lon"]) if row.get("lon") else None
-            except (ValueError, KeyError):
-                lat = lon = None
-
-            if lat is None or lon is None:
-                skipped += 1
-                continue
-
-            # Skip already-imported timestamps
-            if ts in existing_ts:
-                skipped += 1
-                continue
-
-            action   = (row.get("Action")   or "").strip()
-            category = (row.get("Category") or "").strip()
-            address  = (row.get("Address")  or "").strip()
-            note     = (row.get("Note")     or "").strip() or None
-            emotion  = (row.get("Emotion")  or "").strip() or None
-
-            stars_raw = row.get("Stars", "0").strip()
-            try:
-                stars_10 = int(float(stars_raw))
-            except (ValueError, TypeError):
-                stars_10 = 0
-
-            weather_main = row.get("Weather_main", "").strip() or None
-            weather_desc = row.get("Weather_desc", "").strip() or None
-            try:
-                temp      = float(row["Temp"])      if row.get("Temp")      else None
-                pressure  = float(row["Pressure"])  if row.get("Pressure")  else None
-                humidity  = float(row["Humidity"])  if row.get("Humidity")  else None
-                wind_speed= float(row["Wind_speed"])if row.get("Wind_speed")else None
-            except (ValueError, KeyError):
-                temp = pressure = humidity = wind_speed = None
-
-            # Determine if this is a home/anchor dwell
-            is_anchor = action.lower() == "home"
-            is_transport = (
-                category.lower() in _SKIP_CATEGORIES or
-                action.lower() in {"road", "transport"}
-            )
-
-            # Insert ping
-            sid = 0 if is_anchor else None
-            with get_conn() as conn:
-                conn.execute(
-                    """INSERT OR IGNORE INTO pings
-                       (ts, lat, lon, address, weather_main, weather_desc,
-                        temp, pressure, humidity, wind_speed, session_id)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                    (ts, lat, lon, address or None, weather_main, weather_desc,
-                     temp, pressure, humidity, wind_speed, sid),
-                )
-            existing_ts.add(ts)
-            pings_imported += 1
-
-            # Create session + feedback for rated non-transport, non-home rows
-            if stars_10 > 0 and not is_anchor and not is_transport and action.lower() not in _SKIP_ACTIONS:
-                stars_5 = max(1, min(5, round(stars_10 / 2)))
-
-                # Resolve activity
-                cat_key = category.lower()
-                if cat_key in _CATEGORY_MAP:
-                    act_name, cluster = _CATEGORY_MAP[cat_key]
-                else:
-                    act_name = action.lower() if action else cat_key or "unknown"
-                    cluster  = "CULTURE"
-
-                try:
-                    duration_s = float(row.get("Duration") or 0) * 60
-                except (ValueError, TypeError):
-                    duration_s = 0.0
-                if duration_s < 60:
-                    duration_s = 1800.0  # default 30 min
-
-                start_ts = ts - int(duration_s)
-                end_ts   = ts
-
-                with get_conn() as conn:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO activities (name, cluster) VALUES (?,?)",
-                        (act_name, cluster),
-                    )
-                    act_id = conn.execute(
-                        "SELECT id FROM activities WHERE name = ?", (act_name,)
-                    ).fetchone()["id"]
-
-                    cur = conn.execute(
-                        """INSERT INTO sessions
-                           (start_ts, end_ts, duration_s, centroid_lat, centroid_lon,
-                            activity_id, confidence, feedback_requested)
-                           VALUES (?,?,?,?,?,?,?,0)""",
-                        (start_ts, end_ts, duration_s, lat, lon, act_id, 0.9),
-                    )
-                    session_id = cur.lastrowid
-
-                    # Update ping to point at this session
-                    conn.execute(
-                        "UPDATE pings SET session_id = ? WHERE ts = ? AND lat = ?",
-                        (session_id, ts, lat),
-                    )
-
-                    row_act = conn.execute(
-                        "SELECT alpha, beta FROM activities WHERE id = ?", (act_id,)
-                    ).fetchone()
-                    new_a, new_b = update_posterior(row_act["alpha"], row_act["beta"], stars_5)
-                    conn.execute(
-                        "UPDATE activities SET alpha = ?, beta = ? WHERE id = ?",
-                        (new_a, new_b, act_id),
-                    )
-
-                    conn.execute(
-                        "INSERT INTO feedback (session_id, stars, note, emotion, ts) VALUES (?,?,?,?,?)",
-                        (session_id, stars_5, note, emotion, ts),
-                    )
-                    conn.execute(
-                        """UPDATE goals SET progress = (
-                               SELECT COUNT(*) FROM sessions
-                               WHERE activity_id = goals.activity_id
-                                 AND end_ts >= (CAST(strftime('%s','now') AS INTEGER) - cadence_days * 86400)
-                           ) WHERE activity_id = ?""",
-                        (act_id,),
-                    )
-
-                sessions_created += 1
-                feedback_created += 1
-
-    return {
-        "pings_imported":   pings_imported,
-        "sessions_created": sessions_created,
-        "feedback_created": feedback_created,
-        "skipped":          skipped,
-    }

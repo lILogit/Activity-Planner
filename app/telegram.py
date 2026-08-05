@@ -65,12 +65,10 @@ async def request_feedback(session_id: int, activity_name: str, when: str) -> di
 
 # ---------- unknown staypoint venue tagging ----------
 
-_pending_venue: dict | None = None  # last unknown staypoint waiting for /venue reply
-
-
 async def request_unknown_venue(session_id: int, lat: float, lon: float, dwell_min: int) -> None:
-    global _pending_venue
-    _pending_venue = {"session_id": session_id, "lat": lat, "lon": lon}
+    """Mark a session as pending a venue tag via /venue reply. State is now DB-backed."""
+    with get_conn() as conn:
+        conn.execute("UPDATE sessions SET venue_pending = 1 WHERE id = ?", (session_id,))
     await trace(f"❓ Unknown session #{session_id} — asking user to identify venue")
     await send_message(
         f"📍 New staypoint: {dwell_min}min at ({lat:.4f}, {lon:.4f}) — no matching venue.\n"
@@ -133,31 +131,47 @@ async def _handle_enrich(text: str) -> None:
 
 
 async def _handle_venue(text: str) -> None:
-    """Handle /venue <name>, <activity> reply to tag an unknown staypoint."""
-    global _pending_venue
-    if not _pending_venue:
-        await send_message("No pending staypoint to tag right now.")
-        return
+    """Handle /venue <name>, <activity> reply to tag an unknown staypoint.
+
+    Reads the most recent session with venue_pending=1 from the DB (the lat/lon
+    are already on the session row), then updates the venue name/activity and clears
+    the flag. This removes the race condition from the old global _pending_venue.
+    """
     parts = [p.strip() for p in text.split(",", 1)]
     if len(parts) != 2 or not parts[0] or not parts[1]:
         await send_message("Format: `/venue <venue name>, <activity>`\nExample: `/venue Riegrovy sady, cycling`")
         return
     venue_name, activity_name = parts[0], parts[1].lower()
-    lat, lon = _pending_venue["lat"], _pending_venue["lon"]
-    session_id = _pending_venue["session_id"]
+
     with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, centroid_lat, centroid_lon FROM sessions WHERE venue_pending = 1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            await send_message("No pending staypoint to tag right now.")
+            return
+        session_id, lat, lon = row["id"], row["centroid_lat"], row["centroid_lon"]
+
         conn.execute("INSERT OR IGNORE INTO activities (name, cluster) VALUES (?,?)", (activity_name, "SPORT"))
         act_id = conn.execute("SELECT id FROM activities WHERE name=?", (activity_name,)).fetchone()["id"]
+
+        # Check if a venue already exists at this location with the same name (from auto-create)
+        existing = conn.execute("SELECT id FROM venues WHERE name=? AND lat=? AND lon=?", (venue_name, lat, lon)).fetchone()
+        if existing:
+            venue_id = existing["id"]
+            conn.execute("UPDATE venues SET activity_id = ? WHERE id = ?", (act_id, venue_id))
+        else:
+            conn.execute(
+                "INSERT OR IGNORE INTO venues (name, lat, lon, radius_m, activity_id) VALUES (?,?,?,?,?)",
+                (venue_name, lat, lon, 200, act_id),
+            )
+            venue_id = conn.execute("SELECT id FROM venues WHERE name=?", (venue_name,)).fetchone()["id"]
+
         conn.execute(
-            "INSERT OR IGNORE INTO venues (name, lat, lon, radius_m, activity_id) VALUES (?,?,?,?,?)",
-            (venue_name, lat, lon, 200, act_id),
-        )
-        venue_id = conn.execute("SELECT id FROM venues WHERE name=?", (venue_name,)).fetchone()["id"]
-        conn.execute(
-            "UPDATE sessions SET venue_id=?, activity_id=? WHERE id=?",
+            "UPDATE sessions SET venue_id=?, activity_id=?, venue_pending = 0 WHERE id=?",
             (venue_id, act_id, session_id),
         )
-    _pending_venue = None
+
     await trace(f"📍 Session #{session_id} tagged → {activity_name} @ {venue_name}")
     await request_feedback(session_id, activity_name, "earlier today")
 

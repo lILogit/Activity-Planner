@@ -1,12 +1,13 @@
 # KAIROS on Hostinger VPS — Traefik terminates TLS (Let's Encrypt) and routes
 services:
   traefik:
-    image: "traefik"
+    image: "traefik:v2.10"
     container_name: kairos-traefik
     restart: unless-stopped
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=kairos"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
@@ -14,17 +15,28 @@ services:
       - "--certificatesresolvers.kairosresolver.acme.tlschallenge=true"
       - "--certificatesresolvers.kairosresolver.acme.email=${SSL_EMAIL}"
       - "--certificatesresolvers.kairosresolver.acme.storage=/letsencrypt/acme.json"
+      - "--accesslog=true"
+      - "--accesslog.file.path=/logs/access.log"
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - traefik_data:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_logs:/logs
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "--tries=1", "--timeout=5", "http://localhost:8080/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - kairos
 
   app:
     build:
       context: .
-    image: kairos:latest
+    image: kairos:${TAG:-latest}
     container_name: kairos
     restart: unless-stopped
     env_file:
@@ -41,7 +53,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.kairos.rule=Host(`${DOMAIN_NAME}`)
       - traefik.http.routers.kairos.tls=true
-      - traefik.http.routers.kairos.entrypoints=web,websecure
+      - traefik.http.routers.kairos.entrypoints=websecure
       - traefik.http.routers.kairos.tls.certresolver=kairosresolver
       - traefik.http.services.kairos.loadbalancer.server.port=8000
       - traefik.http.middlewares.kairos-headers.headers.SSLRedirect=true
@@ -54,12 +66,26 @@ services:
       - traefik.http.middlewares.kairos-headers.headers.STSPreload=true
       - traefik.http.routers.kairos.middlewares=kairos-headers@docker
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status==200 else 1)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - kairos
 
 volumes:
   data:
   traefik_data:
+  traefik_logs:
+
+networks:
+  kairos:
+    driver: bridge
+

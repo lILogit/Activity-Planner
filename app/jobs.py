@@ -56,10 +56,20 @@ async def enrichment() -> None:
     return None
 
 
+async def detect_patterns_job() -> None:
+    """Daily route pattern detection job."""
+    from .patterns import detect_patterns, upsert_patterns
+    patterns = detect_patterns(min_repeats=3)
+    if patterns:
+        upserted = upsert_patterns(patterns)
+        await telegram.trace(f"🔁 Patterns updated: {upserted} routes")
+
+
 def build_scheduler() -> AsyncIOScheduler:
     sched = AsyncIOScheduler(timezone=settings.tz)
     sched.add_job(morning_plan, CronTrigger(hour=6, minute=30), id="morning_plan")
     sched.add_job(weekly_plan, CronTrigger(day_of_week="sun", hour=18), id="weekly_plan")
     sched.add_job(kairos_window, CronTrigger(minute=0), id="kairos_window")  # hourly
     sched.add_job(enrichment, CronTrigger(day_of_week="mon", hour=7), id="enrichment")
+    sched.add_job(detect_patterns_job, CronTrigger(hour=3, minute=17), id="detect_patterns")
     return sched

@@ -23,6 +23,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "address" not in cols:
         conn.execute("ALTER TABLE venues ADD COLUMN address TEXT")
 
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+    if "venue_pending" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN venue_pending INTEGER NOT NULL DEFAULT 0")
+
 
 def init_db(seed: bool = True) -> None:
     with get_conn() as conn:

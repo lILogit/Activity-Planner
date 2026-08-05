@@ -83,25 +83,67 @@ const TABLES = {
     {key:'lat', type:'number', required:true},
     {key:'lon', type:'number', required:true},
     {key:'radius_m', type:'number'},
-    {key:'activity_id', type:'fk'},
+    {key:'activity_id', type:'fk', fk_table:'activities'},
     {key:'is_anchor', type:'bool'},
     {key:'address', type:'text'},
-  ]},
+  ], mode:'full'},
   rules: { label: 'Rules', columns: [
     {key:'cond_type', type:'text', required:true},
     {key:'cond_value', type:'text', required:true},
-    {key:'activity_id', type:'fk', required:true},
+    {key:'activity_id', type:'fk', fk_table:'activities', required:true},
     {key:'kind', type:'select', options:['activate','block','modulate'], required:true},
     {key:'weight', type:'number'},
-  ]},
+  ], mode:'full'},
   goals: { label: 'Goals', columns: [
     {key:'name', type:'text', required:true},
-    {key:'activity_id', type:'fk'},
+    {key:'activity_id', type:'fk', fk_table:'activities'},
     {key:'metric', type:'text'},
     {key:'target', type:'number', required:true},
     {key:'cadence_days', type:'number'},
     {key:'progress', type:'number'},
-  ]},
+  ], mode:'full'},
+  sessions: { label: 'Sessions', columns: [
+    {key:'start_ts', type:'number'},
+    {key:'end_ts', type:'number'},
+    {key:'duration_s', type:'number'},
+    {key:'centroid_lat', type:'number'},
+    {key:'centroid_lon', type:'number'},
+    {key:'venue_id', type:'fk', fk_table:'venues'},
+    {key:'activity_id', type:'fk', fk_table:'activities'},
+    {key:'confidence', type:'number'},
+    {key:'feedback_requested', type:'bool'},
+  ], mode:'full'},
+  feedback: { label: 'Feedback', columns: [
+    {key:'session_id', type:'fk', fk_table:'sessions', required:true},
+    {key:'stars', type:'number', required:true},
+    {key:'note', type:'text'},
+    {key:'emotion', type:'text'},
+    {key:'ts', type:'number', required:true},
+  ], mode:'full'},
+  pings: { label: 'Pings', columns: [
+    {key:'ts', type:'number', required:true},
+    {key:'lat', type:'number', required:true},
+    {key:'lon', type:'number', required:true},
+    {key:'altitude', type:'number'},
+    {key:'wifi', type:'text'},
+    {key:'address', type:'text'},
+    {key:'weather_main', type:'text'},
+    {key:'weather_desc', type:'text'},
+    {key:'temp', type:'number'},
+    {key:'pressure', type:'number'},
+    {key:'humidity', type:'number'},
+    {key:'wind_speed', type:'number'},
+    {key:'distance_m', type:'number'},
+    {key:'duration_s', type:'number'},
+    {key:'session_id', type:'fk', fk_table:'sessions'},
+  ], mode:'log'},
+  plans: { label: 'Plans', columns: [
+    {key:'date', type:'text', required:true},
+    {key:'horizon', type:'text', required:true},
+    {key:'status', type:'text'},
+    {key:'payload', type:'text'},
+    {key:'created_ts', type:'number', required:true},
+  ], mode:'readonly'},
 };
 
 let currentTable = 'activities';
@@ -116,6 +158,76 @@ function switchTable(name) {
   currentTable = name;
   renderTabs();
   loadTable(name);
+}
+
+function updateBulkBar() {
+  const selected = document.querySelectorAll('.row-select:checked');
+  const count = selected.length;
+  const bar = document.getElementById('bulk-actions');
+  const countSpan = document.getElementById('selected-count');
+  if (count > 0) {
+    bar.style.display = 'block';
+    countSpan.textContent = `${count} row${count === 1 ? '' : 's'} selected`;
+  } else {
+    bar.style.display = 'none';
+  }
+  return count;
+}
+
+async function bulkDelete(name) {
+  const selected = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.dataset.id));
+  if (!selected.length) return;
+  if (!confirm(`Delete ${selected.length} row${selected.length === 1 ? '' : 's'}?`)) return;
+  try {
+    await api(`/api/${name}/bulk`, 'POST', {action: 'delete', ids: selected});
+    showStatus(`Deleted ${selected.length} row${selected.length === 1 ? '' : 's'}.`);
+    loadTable(name);
+  } catch (e) {
+    showStatus('Error: ' + e.message, true);
+  }
+}
+
+async function exportCsv(name) {
+  showStatus('Exporting…');
+  try {
+    const r = await fetch(`/api/${name}/export`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showStatus(`Exported ${name}.csv`);
+  } catch (e) {
+    showStatus('Error: ' + e.message, true);
+  }
+}
+
+async function importCsv(name) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    showStatus('Importing…');
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const r = await fetch(`/api/${name}/import`, {method: 'POST', body: formData});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+      showStatus(`Imported ${d.imported} row${d.imported === 1 ? '' : 's'}, skipped ${d.skipped}`);
+      loadTable(name);
+    } catch (e) {
+      showStatus('Error: ' + e.message, true);
+    }
+  };
+  input.click();
 }
 
 function showStatus(msg, isErr) {
@@ -141,12 +253,20 @@ async function loadTable(name) {
   document.getElementById('table-container').innerHTML = 'Loading…';
   try {
     const cfg = TABLES[name];
-    const needsActivities = cfg.columns.some(c => c.type === 'fk') || name === 'activities';
-    const [rows, activities] = await Promise.all([
-      api(`/api/${name}`),
-      needsActivities ? api('/api/activities') : Promise.resolve([]),
-    ]);
-    renderTable(name, rows, activities);
+    // Collect all distinct fk_table values
+    const fkTables = new Set();
+    cfg.columns.forEach(c => {
+      if (c.type === 'fk' && c.fk_table) fkTables.add(c.fk_table);
+    });
+    // Fetch rows and all FK tables in parallel
+    const promises = [api(`/api/${name}`)];
+    fkTables.forEach(t => promises.push(api(`/api/${t}`)));
+    const results = await Promise.all(promises);
+    const rows = results[0];
+    const fkData = {};
+    let idx = 1;
+    fkTables.forEach(t => { fkData[t] = results[idx++]; });
+    renderTable(name, rows, fkData);
     showStatus('');
   } catch (e) {
     showStatus('Error: ' + e.message, true);
@@ -158,7 +278,7 @@ function fieldId(table, rowId, key) {
   return `f-${table}-${rowId}-${key}`;
 }
 
-function renderField(table, col, rowId, value, activities) {
+function renderField(table, col, rowId, value, fkData) {
   const id = fieldId(table, rowId, col.key);
   if (col.type === 'select') {
     const opts = col.options.map(o =>
@@ -167,8 +287,10 @@ function renderField(table, col, rowId, value, activities) {
     return `<select id="${id}">${opts}</select>`;
   }
   if (col.type === 'fk') {
+    const fkRows = fkData[col.fk_table] || [];
+    const labelKey = col.fk_table === 'activities' ? 'name' : 'name';  // FK tables all use 'name'
     const opts = ['<option value="">—</option>'].concat(
-      activities.map(a => `<option value="${a.id}"${a.id === value ? ' selected' : ''}>${esc(a.name)}</option>`)
+      fkRows.map(r => `<option value="${r.id}"${r.id === value ? ' selected' : ''}>${esc(r[labelKey] || r.id)}</option>`)
     ).join('');
     return `<select id="${id}">${opts}</select>`;
   }
@@ -190,39 +312,64 @@ function collectField(table, col, rowId) {
   return el.value;
 }
 
-function renderTable(name, rows, activities) {
+function renderTable(name, rows, fkData) {
   const cfg = TABLES[name];
+  const mode = cfg.mode || 'full';
   const hasMap = name === 'venues';
+  const isReadonly = mode === 'readonly';
+  const isLog = mode === 'log';
   const thead = cfg.columns.map(c => `<th>${esc(c.key)}</th>`).join('') + (hasMap ? '<th></th>' : '') + '<th></th>';
   const mapCell = r => `<td><a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" rel="noopener">Map</a></td>`;
+
   const body = rows.map(r => {
     const cells = cfg.columns.map(c =>
-      `<td>${renderField(name, c, r.id, r[c.key], activities)}</td>`
+      `<td>${isLog || isReadonly ? esc(r[c.key] ?? '') : renderField(name, c, r.id, r[c.key], fkData)}</td>`
     ).join('');
-    return `<tr>
+    const canDelete = !isReadonly;
+    return `<tr data-id="${r.id}">
+      <td>${canDelete ? `<input type="checkbox" class="row-select" data-id="${r.id}">` : ''}</td>
       <td class="muted" style="color:var(--muted)">${r.id}</td>
       ${cells}
       ${hasMap ? mapCell(r) : ''}
       <td class="actions">
-        <button class="act primary" onclick="saveRow('${name}', ${r.id})">Save</button>
-        <button class="act danger" onclick="deleteRow('${name}', ${r.id})">Delete</button>
+        ${!isReadonly ? `<button class="act danger" onclick="deleteRow('${name}', ${r.id})">Delete</button>` : ''}
       </td>
     </tr>`;
   }).join('');
-  const newCells = cfg.columns.map(c =>
-    `<td>${renderField(name, c, 'new', c.type === 'bool' ? 0 : '', activities)}</td>`
-  ).join('');
-  const newRow = `<tr class="new-row">
+
+  const newRow = !isReadonly && !isLog ? `<tr class="new-row">
+    <td></td>
     <td class="muted" style="color:var(--muted)">new</td>
-    ${newCells}
+    ${cfg.columns.map(c => `<td>${renderField(name, c, 'new', c.type === 'bool' ? 0 : '', fkData)}</td>`).join('')}
     ${hasMap ? '<td></td>' : ''}
     <td><button class="act primary" onclick="addRow('${name}')">Add</button></td>
-  </tr>`;
+  </tr>` : '';
+
+  const importable = name === 'pings' || name === 'feedback';
   document.getElementById('table-container').innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="act" onclick="exportCsv('${name}')">Export CSV</button>
+      ${importable ? `<button class="act" onclick="importCsv('${name}')">Import CSV</button>` : ''}
+    </div>
+    <div id="bulk-actions" style="display:none;margin-bottom:12px">
+      <button class="act danger" onclick="bulkDelete('${name}')">Delete selected</button>
+      <span id="selected-count" style="margin-left:8px;color:var(--muted)"></span>
+    </div>
     <table>
-      <thead><tr><th>id</th>${thead}</tr></thead>
-      <tbody>${body || `<tr><td colspan="${cfg.columns.length + (hasMap ? 3 : 2)}" style="color:var(--muted)">No rows yet.</td></tr>`}${newRow}</tbody>
+      <thead><tr><th>${!isReadonly ? '<input type="checkbox" id="select-all">' : ''}</th><th>id</th>${thead}</tr></thead>
+      <tbody>${body || `<tr><td colspan="${cfg.columns.length + (hasMap ? 3 : 2) + (!isReadonly ? 1 : 0)}" style="color:var(--muted)">No rows yet.</td></tr>`}${newRow}</tbody>
     </table>`;
+
+  // Wire up select-all and row checkboxes (only if not readonly)
+  if (!isReadonly) {
+    document.getElementById('select-all').addEventListener('change', e => {
+      document.querySelectorAll('.row-select').forEach(cb => cb.checked = e.target.checked);
+      updateBulkBar();
+    });
+    document.querySelectorAll('.row-select').forEach(cb => {
+      cb.addEventListener('change', updateBulkBar);
+    });
+  }
 }
 
 async function saveRow(name, rowId) {

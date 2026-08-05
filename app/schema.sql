@@ -75,7 +75,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     venue_id           INTEGER REFERENCES venues(id),
     activity_id        INTEGER REFERENCES activities(id),
     confidence         REAL,
-    feedback_requested INTEGER NOT NULL DEFAULT 0
+    feedback_requested INTEGER NOT NULL DEFAULT 0,
+    venue_pending      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS feedback (
@@ -104,4 +105,19 @@ CREATE TABLE IF NOT EXISTS plans (
     status      TEXT NOT NULL DEFAULT 'proposed', -- proposed|approved|rejected|executed
     payload     TEXT NOT NULL,               -- JSON ranked picks + reasoning
     created_ts  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS patterns (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_venue_id    INTEGER,                 -- origin venue
+    to_venue_id      INTEGER,                 -- destination venue
+    from_lat         REAL NOT NULL,
+    from_lon         REAL NOT NULL,
+    to_lat           REAL NOT NULL,
+    to_lon           REAL NOT NULL,
+    count            INTEGER NOT NULL,         -- times this route was taken
+    typical_hour     INTEGER NOT NULL,         -- modal hour (0-23)
+    first_seen       INTEGER NOT NULL,         -- epoch seconds
+    last_seen        INTEGER NOT NULL,         -- epoch seconds
+    kind             TEXT NOT NULL DEFAULT 'routine'  -- routine | commute | trip
 );

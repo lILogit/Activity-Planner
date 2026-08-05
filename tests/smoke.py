@@ -75,6 +75,32 @@ for stars in (5, 5, 4):
 pref = a / (a + b)
 check("posterior 5,5,4 -> pref > 0.7", pref > 0.7, f"a={a} b={b} pref={pref:.3f}")
 
+# 5: pattern detection from repeated A→B venue transitions
+from app.patterns import detect_patterns, upsert_patterns
+with get_conn() as conn:
+    # Insert two venues
+    conn.execute("INSERT INTO venues (name, lat, lon, radius_m, activity_id) VALUES (?,?,?,?,?)",
+                  ("Home A", 49.9621, 14.3838, 200, 1))
+    conn.execute("INSERT INTO venues (name, lat, lon, radius_m, activity_id) VALUES (?,?,?,?,?)",
+                  ("Work B", 50.0847, 14.4208, 200, 1))
+    home_venue = conn.execute("SELECT id FROM venues WHERE name='Home A'").fetchone()["id"]
+    work_venue = conn.execute("SELECT id FROM venues WHERE name='Work B'").fetchone()["id"]
+    # Create 6 sessions: Home → Work → Home → Work → Home → Work (four A→B transitions)
+    for i, (from_v, to_v) in enumerate([(home_venue, work_venue), (work_venue, home_venue),
+                                         (home_venue, work_venue), (work_venue, home_venue),
+                                         (home_venue, work_venue), (work_venue, home_venue)]):
+        start = base_ts + i * 86400
+        conn.execute(
+            "INSERT INTO sessions (start_ts, end_ts, duration_s, centroid_lat, centroid_lon, venue_id, activity_id, confidence) VALUES (?,?,?,?,?,?,?,?)",
+            (start, start + 3600, 3600, 49.9 if from_v == home_venue else 50.0, 14.4 if from_v == home_venue else 14.5,
+             from_v, 1, 0.8)
+        )
+patterns = detect_patterns(min_repeats=3)
+check("pattern detection finds A→B route with count>=3",
+      any(p["count"] >= 3 and p["from_venue_id"] == home_venue and p["to_venue_id"] == work_venue
+          for p in patterns),
+      f"patterns={len(patterns)}")
+
 print()
 if FAIL:
     print(f"{len(FAIL)} check(s) FAILED: {', '.join(FAIL)}")
