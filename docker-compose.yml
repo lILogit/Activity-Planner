@@ -1,20 +1,18 @@
 # KAIROS on Hostinger VPS — Traefik terminates TLS (Let's Encrypt) and routes
 services:
   traefik:
-    # Both v2.10 and v3.1's Docker provider client hardcode API 1.24 with no
-    # negotiation, and Hostinger's host Docker Engine rejects anything below
-    # 1.40 ("client version 1.24 is too old") — no Traefik version fixes this.
-    # Routing is static (file provider, traefik/dynamic.yml) instead of Docker
-    # label discovery, so no docker.sock access is needed at all.
-    image: "traefik:v3.1"
+    # Deliberately UNPINNED. Pinning to a specific tag (v2.10, then v3.1) broke
+    # the Docker provider against Hostinger's host Docker Engine: "Error
+    # response from daemon: client version 1.24 is too old. Minimum supported
+    # API version is 1.40" — both pinned versions' vendored Docker client sent
+    # a stale hardcoded API version. Rolling `latest` is what's proven to work
+    # here; don't re-pin without confirming the new tag negotiates correctly.
+    image: "traefik"
     container_name: kairos-traefik
     restart: unless-stopped
-    environment:
-      # Read by traefik/dynamic.yml's {{ env "DOMAIN_NAME" }} template.
-      DOMAIN_NAME: ${DOMAIN_NAME}
     command:
-      - "--providers.file.filename=/etc/traefik/dynamic.yml"
-      - "--providers.file.watch=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
@@ -29,10 +27,8 @@ services:
       - "443:443"
     volumes:
       - traefik_data:/letsencrypt
-      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_logs:/logs
-    networks:
-      - kairos
 
   app:
     # Image is built by GitHub Actions and pushed to GHCR (see .github/workflows/).
@@ -63,8 +59,26 @@ services:
       - data:/data
     ports:
       - "127.0.0.1:8000:8000"   # loopback only — for local debugging; Traefik reaches the app via the docker network, not this port
-    # No traefik.* labels: routing is static, defined in traefik/dynamic.yml
-    # (the file provider), not Docker label discovery — see the traefik service.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.kairos.rule=Host(`${DOMAIN_NAME}`)
+      - traefik.http.routers.kairos.tls=true
+      - traefik.http.routers.kairos.entrypoints=web,websecure
+      - traefik.http.routers.kairos.tls.certresolver=kairosresolver
+      - traefik.http.services.kairos.loadbalancer.server.port=8000
+      # SSLRedirect/SSLHost were removed in Traefik v3 (use entryPoint
+      # redirection instead — already configured above via
+      # entrypoints.web.http.redirections.entryPoint). Since `image: traefik`
+      # rolls to latest (currently v3.x), these must stay out or the router's
+      # dynamic config fails to load, the same way the static config failed
+      # earlier on `--accesslog.file.path` (unknown field).
+      - traefik.http.middlewares.kairos-headers.headers.STSSeconds=315360000
+      - traefik.http.middlewares.kairos-headers.headers.browserXSSFilter=true
+      - traefik.http.middlewares.kairos-headers.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.kairos-headers.headers.forceSTSHeader=true
+      - traefik.http.middlewares.kairos-headers.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.kairos-headers.headers.STSPreload=true
+      - traefik.http.routers.kairos.middlewares=kairos-headers@docker
     healthcheck:
       # curl is NOT in the image (only tzdata) — use Python's urllib instead.
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status==200 else 1)"]
@@ -72,15 +86,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-    networks:
-      - kairos
 
 volumes:
   data:
   traefik_data:
   traefik_logs:
-
-networks:
-  kairos:
-    driver: bridge
-
