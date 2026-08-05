@@ -18,6 +18,9 @@ services:
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.kairosresolver.acme.tlschallenge=true"
+      # Same interpolation caveat as the Host() rule below — set SSL_EMAIL in
+      # Hostinger's environment-variables UI (or a .env in the project dir), not
+      # just .env.prod, or this registers with a blank ACME contact.
       - "--certificatesresolvers.kairosresolver.acme.email=${SSL_EMAIL}"
       - "--certificatesresolvers.kairosresolver.acme.storage=/letsencrypt/acme.json"
       - "--accesslog=true"
@@ -61,7 +64,12 @@ services:
       - "127.0.0.1:8000:8000"   # loopback only — for local debugging; Traefik reaches the app via the docker network, not this port
     labels:
       - traefik.enable=true
-      - traefik.http.routers.kairos.rule=Host(`${DOMAIN_NAME}`)
+      # Fallback default is REQUIRED for the Hostinger deploy: it clones the repo
+      # into a temp dir where .env* is absent (gitignored), and `env_file:` feeds
+      # the container only — NOT ${...} interpolation here. Without the default
+      # this expands to Host(``), which matches nothing, so no cert is ever
+      # requested and Traefik serves its self-signed fallback (ERR_CERT_AUTHORITY_INVALID).
+      - traefik.http.routers.kairos.rule=Host(`${DOMAIN_NAME:-srv1091358.hstgr.cloud}`)
       - traefik.http.routers.kairos.tls=true
       - traefik.http.routers.kairos.entrypoints=web,websecure
       - traefik.http.routers.kairos.tls.certresolver=kairosresolver
