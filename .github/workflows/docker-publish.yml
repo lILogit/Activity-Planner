@@ -1,0 +1,53 @@
+name: Build and Push Docker Image
+
+# Builds the KAIROS image on every push to main and publishes it to GitHub
+# Container Registry (GHCR). Hostinger's Docker deployment then PULLS the
+# pre-built image instead of building from source — which fails because
+# Hostinger's automated build environment doesn't have the full repo context.
+#
+# First deploy: push to main → wait for this workflow to finish (Actions tab) →
+# then trigger the Hostinger deployment. The image will be in GHCR ready to pull.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # allow manual trigger from the Actions tab
+
+env:
+  # GHCR requires all-lowercase. Owner lILogit → lilogit, repo Activity-Planner → activity-planner.
+  IMAGE: ghcr.io/lilogit/activity-planner
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+      - name: Summary
+        run: |
+          echo "✅ Image published:"
+          echo "   ${{ env.IMAGE }}:latest"
+          echo "   ${{ env.IMAGE }}:${{ github.sha }}"
+          echo ""
+          echo "Hostinger will pull this image on the next deployment."

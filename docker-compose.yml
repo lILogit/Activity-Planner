@@ -28,10 +28,13 @@ services:
       - kairos
 
   app:
+    # Image is built by GitHub Actions and pushed to GHCR (see .github/workflows/).
+    # Hostinger PULLS this image — it does not build from source (its automated
+    # deploy environment lacks the full repo build context).
+    # For local dev: `docker compose up -d --build` builds from the `build:` below.
     build:
       context: .
-    image: kairos:latest
-    pull_policy: build          # always build from source — never try to pull from a registry
+    image: ghcr.io/lilogit/activity-planner:latest
     container_name: kairos
     restart: unless-stopped
     env_file:
