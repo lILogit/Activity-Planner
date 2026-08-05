@@ -35,6 +35,15 @@ services:
     build:
       context: .
     image: ghcr.io/lilogit/activity-planner:latest
+    # Without this, `docker compose up -d` skips pulling once the tag exists
+    # locally, so a redeploy after a new GHCR push silently reuses the old
+    # image. `always` forces a fresh pull every time.
+    # One-time setup: the GHCR package is created private on first push (the
+    # workflow's GITHUB_TOKEN can't flip that) — make it public once at
+    # github.com/lilogit/activity-planner/pkgs/container/activity-planner
+    # (Package settings → Change visibility), or `docker login ghcr.io` on
+    # the VPS with a PAT that has `read:packages`.
+    pull_policy: always
     container_name: kairos
     restart: unless-stopped
     env_file:

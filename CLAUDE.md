@@ -144,7 +144,7 @@ page, GPS module, and Telegram are all available in **both**.
 
 | Surface | Development (local bare-metal) | Production (Hostinger, Traefik) |
 |---|---|---|
-| **Run** | `KAIROS_ENV_FILE=.env.test uvicorn … --reload` | `docker compose up -d --build` (traefik + app) |
+| **Run** | `KAIROS_ENV_FILE=.env.test uvicorn … --reload` | `docker compose up -d` (pulls from GHCR; traefik + app) |
 | **Env file** | `.env.test` (gitignored) | `.env.prod` (gitignored; compose `env_file`) |
 | **Web** (`/dashboard`, `/tables`) | `http://localhost:8000/dashboard` | `https://${DOMAIN_NAME}/dashboard` |
 | **GPS** (Overland `POST /gps`) | `https://<ngrok>.ngrok-free.app/gps` | `https://${DOMAIN_NAME}/gps` |
@@ -261,7 +261,10 @@ curl -s -X POST http://localhost:8000/api/enrich \
 
 # ── Production environment (Hostinger VPS, Docker + Traefik) ─────────────────
 # Edit .env.prod first: set DOMAIN_NAME, SSL_EMAIL, PUBLIC_BASE_URL=https://<DOMAIN_NAME>, + keys
-docker compose up -d --build  # compose injects .env.prod; traefik gets its cert; app boots; Telegram webhook registers on startup
+# Hostinger PULLS the image from GHCR (built by .github/workflows/docker-publish.yml on
+# every push to main) rather than building on the VPS — pull_policy: always in
+# docker-compose.yml forces a fresh pull each time so redeploys pick up new pushes.
+docker compose up -d  # compose injects .env.prod; pulls latest from GHCR; traefik gets its cert; app boots; Telegram webhook registers on startup
 docker compose logs -f traefik   # watch ACME/cert issuance
 docker compose logs -f app
 docker compose ps
